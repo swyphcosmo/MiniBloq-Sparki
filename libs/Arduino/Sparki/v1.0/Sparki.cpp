@@ -15,8 +15,21 @@
 #include "Sparkii2c.h"
 
 static int8_t step_dir[3];                 // -1 = ccw, 1 = cw  
-static volatile uint8_t speed_index[3];     // counter controlling motor speed 
+
 static uint8_t motor_speed[3];              // stores last set motor speed (0-100%)
+
+uint8_t pixel_color = WHITE;
+
+uint8_t ir_active = 1;
+
+static volatile uint8_t move_speed = 100;
+static volatile uint8_t speed_index[3];
+static volatile uint8_t speed_array[3][SPEED_ARRAY_LENGTH];    
+                                        // for each motor, how many 200uS waits between each step. 
+                                        // Cycles through an array of 10 of these counts to average 
+                                        // for better speed control
+
+
 static volatile int8_t step_index[3];       // index into _steps array  
 static uint8_t _steps_right[9];                   // bytes defining stepper coil activations
 static uint8_t _steps_left[9];                   // bytes defining stepper coil activations
@@ -48,12 +61,13 @@ volatile float xAxisAccel;
 volatile float yAxisAccel;
 volatile float zAxisAccel;
 
+// variables for the magnetometer
+volatile uint8_t mag_buffer[RawMagDataLength];
+
 // values for the servo
 volatile int8_t servo_deg_offset = 0;
 
 SparkiClass sparki;
-
-//static volatile int speedCounter;
 
 SparkiClass::SparkiClass()
 {
@@ -142,19 +156,18 @@ void SparkiClass::begin( ) {
   updateLCD();
 
   // Setup initial Stepper settings
-  motor_speed[MOTOR_LEFT] = motor_speed[MOTOR_RIGHT] = motor_speed[MOTOR_GRIPPER] =100;
+  motor_speed[MOTOR_LEFT] = motor_speed[MOTOR_RIGHT] = motor_speed[MOTOR_GRIPPER] = move_speed;
   
-  
-  
-  // Set up the scheduler routine to run every 100uS, based off Timer4 interrupt
+  // Set up the scheduler routine to run every 200uS, based off Timer4 interrupt
   cli();          // disable all interrupts
   TCCR4A = 0;
   TCCR4B = 0;
   TCNT4  = 0;
 
-  OCR4A = 48;               // compare match register 16MHz/32/10000Hz
-  TCCR4B |= (1 << WGM12);   // CTC mode
-  TCCR4B = 0x06;            // CLK/32 prescaler (32 = 2^(0110-1))
+  OCR4A = 48;               // compare match register 64MHz/2048 = 31250hz
+  //TCCR4B |= (1 << WGM12);   // CTC mode
+  TCCR4B = 0x06;
+  //TCCR4B = _BV(CS43) | _BV(CS42);            // CLK/2048 prescaler
   TIMSK4 |= (1 << OCIE4A);  // enable Timer4 compare interrupt A
   sei();             // enable all interrupts
   
@@ -170,8 +183,8 @@ void SparkiClass::begin( ) {
   
   initAccelerometer();
   
-   WireWrite(ConfigurationRegisterB, (0x01 << 5));
-   WireWrite(ModeRegister, Measurement_Continuous);  
+  WireWrite(ConfigurationRegisterB, (0x01 << 5));
+  WireWrite(ModeRegister, Measurement_Continuous);  
   readMag(); // warm it up  
 
 }
@@ -273,7 +286,7 @@ int SparkiClass::diffIR(int pin0, int pin1, int pin2){
 }
 
 void SparkiClass::beep(){
-    tone(BUZZER, 4000, 200);
+    tone(BUZZER, BUZZER_FREQ, 200);
 }
 
 void SparkiClass::beep(int freq){
@@ -288,96 +301,149 @@ void SparkiClass::noBeep(){
     noTone(BUZZER);
 }
 
+void SparkiClass::RGB(uint8_t R, uint8_t G, uint8_t B)
+{
+    if(R > 100){
+        R = 100;
+    }
+    if(G > 100){
+        G = 100;
+    }
+    if(B > 100){
+        B = 100;
+    }
+	RGB_vals[0] = R;
+	RGB_vals[1] = G;
+	RGB_vals[2] = B;
+}
 
 /*
  * motor control (non-blocking, except when moving distances)
  * speed is percent 0-100
 */
 
-void SparkiClass::RGB(uint8_t R, uint8_t G, uint8_t B)
-{
-	RGB_vals[0] = R;
-	RGB_vals[1] = G;
-	RGB_vals[2] = B;
-}
-
 void SparkiClass::moveRight(float deg)
 {
-  float turn = 21.388888*deg;
-  if( (deg == -1) || (deg == 0) ){
+  unsigned long steps = STEPS_PER_DEGREE*deg;
+  if(deg == 0){
       moveRight();
   }
   else{
-      moveRight();
-      delay(long(turn));
-      moveStop();
+      if(deg < 0){
+        moveLeft(deg);
+      }
+      else{
+          stepRight(steps);
+          while( areMotorsRunning() ){
+            delay(1);
+          }
+      }
   }
+}
+
+void SparkiClass::stepRight(unsigned long steps)
+{
+  motorRotate(MOTOR_LEFT, DIR_CCW, move_speed, steps);
+  motorRotate(MOTOR_RIGHT, DIR_CCW, move_speed, steps);
 }
 
 void SparkiClass::moveRight()
 {
-  motorRotate(MOTOR_LEFT, DIR_CCW, 100);
-  motorRotate(MOTOR_RIGHT, DIR_CCW, 100);
-  
+  motorRotate(MOTOR_LEFT, DIR_CCW, move_speed, ULONG_MAX);
+  motorRotate(MOTOR_RIGHT, DIR_CCW, move_speed, ULONG_MAX);
 }
 
 void SparkiClass::moveLeft(float deg)
 {
-  float turn = 21.388888*deg;
-  if( (deg == -1) || (deg == 0) ){
+  unsigned long steps = STEPS_PER_DEGREE*deg;
+  if(deg == 0){
       moveLeft();
   }
   else{
-      moveLeft();
-      delay(long(turn));
-      moveStop();
+      if(deg < 0){
+        moveRight(deg);
+      }
+      else{
+          stepLeft(steps);
+          while( areMotorsRunning() ){
+            delay(1);
+          }
+      }
   }
+}
+
+void SparkiClass::stepLeft(unsigned long steps)
+{
+  motorRotate(MOTOR_LEFT,  DIR_CW, move_speed, steps);
+  motorRotate(MOTOR_RIGHT, DIR_CW, move_speed, steps);
 }
 
 void SparkiClass::moveLeft()
 {
-  motorRotate(MOTOR_LEFT, DIR_CW, 100);
-  motorRotate(MOTOR_RIGHT, DIR_CW, 100);
-  
+  motorRotate(MOTOR_LEFT,  DIR_CW, move_speed, ULONG_MAX);
+  motorRotate(MOTOR_RIGHT, DIR_CW, move_speed, ULONG_MAX);
 }
 
 void SparkiClass::moveForward(float cm)
 {
-  float run = 222.222222*cm;
-  if( (cm == -1) || (cm == 0) ){
+  unsigned long steps = STEPS_PER_CM*cm;
+  if(cm == 0){
       moveForward();
   }
   else{
-      moveForward();
-      delay(run);
-      moveStop();
+      if(cm < 0){
+        moveBackward(cm);
+      }
+      else{
+          stepForward(steps);
+          while( areMotorsRunning() ){
+            delay(1);
+          }
+      }
   }
+}
+
+void SparkiClass::stepForward(unsigned long steps)
+{
+  motorRotate(MOTOR_LEFT, DIR_CCW, move_speed, steps);
+  motorRotate(MOTOR_RIGHT, DIR_CW, move_speed, steps);
 }
 
 void SparkiClass::moveForward()
 {
-  motorRotate(MOTOR_LEFT, DIR_CCW, 100);
-  motorRotate(MOTOR_RIGHT, DIR_CW, 100);
-  
+  motorRotate(MOTOR_LEFT, DIR_CCW, move_speed, ULONG_MAX);
+  motorRotate(MOTOR_RIGHT, DIR_CW, move_speed, ULONG_MAX);
 }
 
 void SparkiClass::moveBackward(float cm)
 {
-  float run = 222.222222*cm;
-  if( (cm == -1) || (cm == 0) ){
+  unsigned long steps = STEPS_PER_CM*cm;
+  if(cm == 0){
       moveBackward();
   }
   else{
-      moveBackward();
-      delay(run);
-      moveStop();
+      if(cm < 0){
+        moveForward(cm);
+      }
+      else{
+          stepBackward(steps);
+          while( areMotorsRunning() ){
+            delay(1);
+          }
+      }
   }
+}
+
+void SparkiClass::stepBackward(unsigned long steps)
+{
+  motorRotate(MOTOR_LEFT,   DIR_CW, move_speed, steps);
+  motorRotate(MOTOR_RIGHT, DIR_CCW, move_speed, steps);
 }
 
 void SparkiClass::moveBackward()
 {
-  motorRotate(MOTOR_LEFT, DIR_CW, 100);
-  motorRotate(MOTOR_RIGHT, DIR_CCW, 100);
+  motorRotate(MOTOR_LEFT,   DIR_CW, move_speed, ULONG_MAX);
+  motorRotate(MOTOR_RIGHT, DIR_CCW, move_speed, ULONG_MAX);
 }
 
 void SparkiClass::moveStop()
@@ -388,59 +454,69 @@ void SparkiClass::moveStop()
 
 void SparkiClass::gripperOpen()
 {
-  motorRotate(MOTOR_GRIPPER, DIR_CCW, 100);
+  motorRotate(MOTOR_GRIPPER, DIR_CCW, move_speed, ULONG_MAX);
 }
 void SparkiClass::gripperClose()
 {
-  motorRotate(MOTOR_GRIPPER, DIR_CW, 100);
+  motorRotate(MOTOR_GRIPPER, DIR_CW, move_speed, ULONG_MAX);
 }
 void SparkiClass::gripperStop()
 {
   motorStop(MOTOR_GRIPPER);
 }
 
-void SparkiClass::motorRotate(int motor, int direction,  int speed)
+void SparkiClass::speed(uint8_t speed)
 {
-   //Serial.print("Motor ");Serial.print(motor); Serial.print(" rotate, dir= "); Serial.println(direction);
-   uint8_t oldSREG = SREG;
-   cli();
-   motor_speed[motor] = speed;  
-   step_dir[motor] = direction;  
-   remainingSteps[motor] = ULONG_MAX; // motor stops after this many steps, almost 50 days of stepping if motor not stopped
-   isRunning[motor] = true;
-   speedCount[motor] = int(100.0/float(motor_speed[motor])*5.0);
-   speedCounter[motor] = speedCount[motor];
-   SREG = oldSREG; 
-   sei();
-   delay(10);
+    move_speed = speed;
+}
+
+
+void SparkiClass::motorRotate(int motor, int direction, int speed, long steps)
+{
+   Serial.print("Motor ");Serial.print(motor); Serial.print(" rotate, dir= "); 
+   Serial.print(direction); Serial.print(", steps= "); Serial.println(steps);
+   
+   motor_speed[motor] = speed; // speed in 1-100 precent
+   
+   // populate the speed array with multiples of 200us waits between steps
+   // having 10 different waits allows finer grained control
+   if(speed == 0){
+      uint8_t oldSREG = SREG; cli();
+      remainingSteps[motor] = 0; 
+      isRunning[motor] = false;
+      SREG = oldSREG; sei(); 
+   }
+   else{
+      int base_waits = 500/speed;
+      int remainder_waits = int((500.0/float(speed) - float(base_waits))*SPEED_ARRAY_LENGTH); 
+
+      for(uint8_t i=0; i< (SPEED_ARRAY_LENGTH-remainder_waits); i++){
+         speed_array[motor][i] = base_waits+1;
+       }
+      for(uint8_t i=(SPEED_ARRAY_LENGTH-remainder_waits); i<SPEED_ARRAY_LENGTH; i++){
+         speed_array[motor][i] = base_waits;
+       }
+      
+      uint8_t oldSREG = SREG; cli();
+      speed_index[motor] = 0;
+      speedCount[motor] = speed_array[motor][0];
+      speedCounter[motor] = speedCount[motor];
+      remainingSteps[motor] = steps;
+      step_dir[motor] = direction;  
+      isRunning[motor] = true;
+      SREG = oldSREG; sei(); 
+
+      Serial.print("base: ");
+      Serial.print(base_waits);
+      Serial.print(", remainder: ");
+      Serial.println(remainder_waits);
+   }
+   delay(1);
 }
 
 void SparkiClass::motorStop(int motor)
 {
-   //Serial.println("Motor Stop"); 
-   motor_speed[motor] = 0;  
-   setSteps(motor, 0);
-}
-
-void SparkiClass::motorsRotateSteps( int leftDir, int rightDir,  int speed, uint32_t steps, bool wait)
-{
-  uint8_t oldSREG = SREG;
-  cli();
-  motor_speed[MOTOR_LEFT] = motor_speed[MOTOR_RIGHT] = speed;  
-  step_dir[MOTOR_LEFT] = leftDir;   
-  step_dir[MOTOR_RIGHT] = rightDir; 
-  remainingSteps[MOTOR_LEFT] = remainingSteps[MOTOR_RIGHT] = steps;
-  isRunning[MOTOR_LEFT] = isRunning[MOTOR_RIGHT] = true;
-
-  SREG = oldSREG; 
-  sei();
-  if( wait)
-  {
-    while ( areMotorsRunning() ){
-      delay(10);  // remainingSteps is decrimented in the timer callback     
-    }
-  }  
- 
+   motorRotate(motor, 1, 0, 0);
 }
  
  // returns true if one or both motors a still stepping
@@ -451,6 +527,7 @@ void SparkiClass::motorsRotateSteps( int leftDir, int rightDir,  int speed, uint
    cli();
    result =  isRunning[MOTOR_LEFT] || isRunning[MOTOR_RIGHT] || isRunning[MOTOR_GRIPPER] ;
    SREG = oldSREG; 
+   sei();
    return result;
  }
 
@@ -533,6 +610,106 @@ int SparkiClass::ping(){
   return int(distances[(int)ceil((float)attempts/2.0)]); 
 }
 
+// Uses timer3 to send on/off IR pulses according to the NEC IR transmission standard
+// http://wiki.altium.com/display/ADOH/NEC+Infrared+Transmission+Protocol
+// protocol. Turns off timer3 functions and timer4 motor/LED interference to avoid conflict
+void SparkiClass::sendIR(uint8_t code){
+  char oldSREG = SREG;				
+  noInterrupts();  // Disable interrupts for 16 bit register access
+  
+  //***********************************************
+  // Set up and tear down Timer3 and Timer4 roles
+  //***********************************************
+  
+  // saves settings for timer3
+  uint8_t TIMSK3_store = TIMSK3;
+  uint8_t TCCR3A_store = TCCR3A;
+  uint8_t TCCR3B_store = TCCR3B;
+  uint8_t TCNT3_store = TCNT3;  
+  uint8_t EIMSK_store = EIMSK;
+  
+  uint8_t TIMSK4_store = TIMSK4;
+  
+  // wipe the timer settings
+  TIMSK4 = 0;
+  TIMSK3 = 0;
+  TCCR3A = 0;
+  TCCR3B = 0;
+  TCNT3  = 0;
+  EIMSK  = 0;
+
+  TCCR3B |= _BV(CS31);      // set timer clock at 1/8th of CLK_i/o (=CLK_sys)
+  OCR3B = 22;               // compare match register
+  
+  TIMSK3 |= (1 << OCIE3B);  // enable Timer3 compare interrupt B
+
+  interrupts();  // re-enable interrupts
+  SREG = oldSREG;
+  
+  
+  //*****************************************
+  // send the pulses 
+  //*****************************************
+  
+  
+  // leadings 9ms pulse, 4.5ms gap
+  irPulse(9000,4500);
+  
+  // 8 bit address
+  for(int i=0; i<8; i++){
+      irPulse(563,563); // NEC logical 0
+  }
+ 
+  // 8 bit address' logical inverse
+  for(int i=0; i<8; i++){
+      irPulse(563,1687); // NEC logical 1
+  }
+  
+  // 8 bit command
+  for(uint8_t i=0; i<8; i++){
+    if( (code & (1<<i)) > 0 ){
+        irPulse(563,1687); // NEC logical 1
+    }
+    else{
+        irPulse(563,563);  // NEC logical 0  
+    }
+  }
+
+  // 8 bit command's logical inverse
+  for(uint8_t i=0; i<8; i++){
+    if( (code & (1<<i)) > 0 ){
+        irPulse(563,563);  // NEC logical 0
+    }
+    else{
+        irPulse(563,1687); // NEC logical 1
+    }
+  }
+  
+  // 562.5µs pulse to signal end of transmission
+  irPulse(563,10); // NEC logical 1  
+
+  //*****************************************
+  // restore Timer3 and Timer4 roles
+  //*****************************************
+  
+  // restore the timer
+  TIMSK4 = TIMSK4_store;
+  TIMSK3 = TIMSK3_store;
+  TCCR3A = TCCR3A_store;
+  TCCR3B = TCCR3B_store;
+  TCNT3  = TCNT3_store;
+  EIMSK  = EIMSK_store;
+}
+
+void SparkiClass::irPulse(uint16_t on, uint16_t off){
+    TIMSK3 |= (1 << OCIE3B);  // enable  38khz signal
+    delayMicroseconds(on);
+    TIMSK3 &= ~(1 << OCIE3B);  // disable 38khz signal
+    PORTD &= ~(1<<7); // make sure the LED is off
+    delayMicroseconds(off);    
+}
+
+
 void SparkiClass::startServoTimer(){
   char oldSREG = SREG;				
   noInterrupts();                                       // Disable interrupts for 16 bit register access
@@ -557,7 +734,7 @@ void SparkiClass::servo(int deg)
   unsigned long dutyCycle = 20000;
   dutyCycle *= duty;
   dutyCycle >>= 10;
-  
+   
   char oldSREG = SREG;
   noInterrupts();
   OCR1A = dutyCycle;
@@ -626,36 +803,6 @@ SIGNAL(INT6_vect) {
   }
 }
 
-// setups up timer to pulse 38khz on and off in a pre-described sequence according to NEC
-// protocol
-// http://wiki.altium.com/display/ADOH/NEC+Infrared+Transmission+Protocol
-
-void SparkiClass::sendIR(uint8_t code){
-    // setup PD7 (6) to 38khz on pin  using TIMER4 COMPD
-
-  
-  OCR4D = 13;               // compare match register 16MHz/32/38000Hz
-  TCCR4D |= (1 << WGM12);   // CTC mode
-  TCCR4D = 0x06;            // CLK/32 prescaler (32 = 2^(0110-1))
-  TIMSK4 |= (1 << OCIE4D);  // enable Timer4 compare interrupt D - need to switch to PWM
-  
-  
-    
-    // go through each bit in byte, pulse appropriate IR
-    //leading pulse Xms on, Yms off
-    
-    //leading pulse of all 0
-    for(uint8_t bit = 0; bit < 8; bit++){ // for each bit in the byte
-        if(code & (1<<bit) > 0){ // determine if bit is 1
-            // bit==1: pulse for Xms on, off for Yms
-        }
-        else{
-            // bit==0: pulse for Xms on, off for Yms
-        }
-    }
-    // re-establish output on Timer 4 for 10khz control loop
-}
-
 float SparkiClass::accelX(){
     readAccelData();
     return -xAxisAccel*9.8;
@@ -670,10 +817,10 @@ float SparkiClass::accelZ(){
 }
 
 float SparkiClass::readMag(){
-  uint8_t* buffer = WireRead(DataRegisterBegin, RawMagDataLength);
-  xAxisMag = ((buffer[0] << 8) | buffer[1]) * M_SCALE;
-  zAxisMag = ((buffer[2] << 8) | buffer[3]) * M_SCALE;
-  yAxisMag = ((buffer[4] << 8) | buffer[5]) * M_SCALE;    
+  WireRead(DataRegisterBegin, RawMagDataLength);
+  xAxisMag = ((mag_buffer[0] << 8) | mag_buffer[1]) * M_SCALE;
+  zAxisMag = ((mag_buffer[2] << 8) | mag_buffer[3]) * M_SCALE;
+  yAxisMag = ((mag_buffer[4] << 8) | mag_buffer[5]) * M_SCALE;    
 }
 
 float SparkiClass::compass(){
@@ -720,16 +867,14 @@ uint8_t* SparkiClass::WireRead(int address, int length){
   Wire.beginTransmission(HMC5883L_Address);
   Wire.requestFrom(HMC5883L_Address, RawMagDataLength);
 
-  uint8_t buffer[RawMagDataLength];
   if(Wire.available() == RawMagDataLength)
   {
 	  for(uint8_t i = 0; i < RawMagDataLength; i++)
 	  {
-		  buffer[i] = Wire.read();
+		  mag_buffer[i] = Wire.read();
 	  }
   }
   Wire.endTransmission();
-  return buffer;
 }
 
  /*
@@ -738,38 +883,23 @@ uint8_t* SparkiClass::WireRead(int address, int length){
  
  // set the number if steps for the given motor 
 
-
-void SparkiClass::setSteps(uint8_t motor, uint32_t steps)
+ISR(TIMER3_COMPB_vect) // IR send function, operates at ~38khz when active
 {
-   uint8_t oldSREG = SREG;
-   cli();
-   remainingSteps[motor] = steps; // motor stops after this many steps
-   isRunning[motor] = steps > 0;
-   SREG = oldSREG;    
-}
-
-uint32_t SparkiClass::getSteps(uint8_t motor )
-{
-   uint8_t oldSREG = SREG;
-   cli();
-   uint32_t steps = remainingSteps[motor];
-   SREG = oldSREG;    
-   return steps;
+    PORTD ^= (1<<7); // toggle the IR LED pin
+    TCNT3=0;
 }
 
 /***********************************************************************************
 The Scheduler
-Every 100uS (10,000 times a second), we update the 2 shift registers used to increase
+Every 200uS (5,000 times a second), we update the 2 shift registers used to increase
 the amount of outputs the processor has
 ***********************************************************************************/
-
 ISR(TIMER4_COMPA_vect)          // interrupt service routine that wraps a user defined function supplied by attachInterrupt
 {
 //void SparkiClass::scheduler(){ 
-    uint8_t oldSREG = SREG;
-    // Clear the timer interrupt counter 
+    // Clear the timer interrupt counter
     TCNT4=0;
-    
+
 	// clear the shift register values so we can re-write them
     shift_outputs[0] = 0x00;
     shift_outputs[1] = 0x00;
@@ -798,17 +928,24 @@ ISR(TIMER4_COMPA_vect)          // interrupt service routine that wraps a user d
     }
     
     //// Motor Control ////
-    
     //   Determine what state the stepper coils are in
 	for(byte motor=0; motor<3; motor++){
-		if( remainingSteps[motor] > 1 ){ // check if finished stepping     
-			if( speedCounter[motor] == 0) { // 
+		if( remainingSteps[motor] > 1 ){ // check if finished stepping   
+		    // speedCount determines the stepping frequency
+		    // interrupt speed (5khz) divided by speedCounter equals stepping freq
+		    // 1khz is the maximum reliable frequency at 5v, so we use 5 as the top speed
+		    // 5,000hz/5 = 1000hz = micro-stepping frequency
+			if(speedCounter[motor] == 0) { 
 				step_index[motor] += step_dir[motor];
 				remainingSteps[motor]--;
-				speedCounter[motor] = speedCount[motor];
+				speedCounter[motor] = speed_array[motor][speed_index[motor]];
+				speed_index[motor]++;
+				if(speed_index[motor] >= SPEED_ARRAY_LENGTH){
+			      speed_index[motor] = 0;
+			    }
 			}
 			else{
-				speedCounter[motor] = speedCounter[motor]-1;
+			   speedCounter[motor] = speedCounter[motor]-1;
 			}
 			
 		}
@@ -833,16 +970,13 @@ ISR(TIMER4_COMPA_vect)          // interrupt service routine that wraps a user d
 
     shift_outputs[0] |= _steps_right[step_index[MOTOR_RIGHT]];
     shift_outputs[0] |= _steps_left[step_index[MOTOR_GRIPPER]];
-    
     shift_outputs[1] |= _steps_left[step_index[MOTOR_LEFT]];
-    
     
 	//output values to shift registers
     PORTD &= ~(1<<5);    // pull PD5 (shift-register latch) low
     SPI.transfer(shift_outputs[1]);
     SPI.transfer(shift_outputs[0]);
     PORTD |= (1<<5);    // pull PD5 (shift-register latch) high 
-    SREG = oldSREG;
 }
 
 /***********************************************************************************
@@ -1198,8 +1332,6 @@ uint8_t st7565_buffer[1024] = {
 static uint8_t xUpdateMin, xUpdateMax, yUpdateMin, yUpdateMax;
 #endif
 
-
-
 static void updateBoundingBox(uint8_t xmin, uint8_t ymin, uint8_t xmax, uint8_t ymax) {
 #ifdef enablePartialUpdate
   if (xmin < xUpdateMin) xUpdateMin = xmin;
@@ -1209,12 +1341,23 @@ static void updateBoundingBox(uint8_t xmin, uint8_t ymin, uint8_t xmax, uint8_t 
 #endif
 }
 
+
+void SparkiClass::setPixelColor(uint8_t color){
+    // sanitize the input
+    if(color == WHITE){
+        pixel_color = WHITE;
+    }
+    if(color == BLACK){
+        pixel_color = BLACK;
+    }
+}
+
 void SparkiClass::drawBitmap(uint8_t x, uint8_t y, 
 			const uint8_t *bitmap, uint8_t w, uint8_t h) {
   for (uint8_t j=0; j<h; j++) {
     for (uint8_t i=0; i<w; i++ ) {
       if (pgm_read_byte(bitmap + i + (j/8)*w) & _BV(j%8)) {
-	my_setpixel(x+i, y+j, WHITE);
+	my_setpixel(x+i, y+j, pixel_color);
       }
     }
   }
@@ -1328,9 +1471,9 @@ void SparkiClass::drawLine(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
 
   for (; x0<=x1; x0++) {
     if (steep) {
-      my_setpixel(y0, x0, WHITE);
+      my_setpixel(y0, x0, pixel_color);
     } else {
-      my_setpixel(x0, y0, WHITE);
+      my_setpixel(x0, y0, pixel_color);
     }
     err -= dy;
     if (err < 0) {
@@ -1346,7 +1489,7 @@ void SparkiClass::drawRectFilled(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
   // stupidest version - just pixels - but fast with internal buffer!
   for (uint8_t i=x; i<x+w; i++) {
     for (uint8_t j=y; j<y+h; j++) {
-      my_setpixel(i, j, WHITE);
+      my_setpixel(i, j, pixel_color);
     }
   }
 
@@ -1357,12 +1500,12 @@ void SparkiClass::drawRectFilled(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
 void SparkiClass::drawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
   // stupidest version - just pixels - but fast with internal buffer!
   for (uint8_t i=x; i<x+w; i++) {
-    my_setpixel(i, y, WHITE);
-    my_setpixel(i, y+h-1, WHITE);
+    my_setpixel(i, y, pixel_color);
+    my_setpixel(i, y+h-1, pixel_color);
   }
   for (uint8_t i=y; i<y+h; i++) {
-    my_setpixel(x, i, WHITE);
-    my_setpixel(x+w-1, i, WHITE);
+    my_setpixel(x, i, pixel_color);
+    my_setpixel(x+w-1, i, pixel_color);
   } 
 
   updateBoundingBox(x, y, x+w, y+h);
@@ -1378,10 +1521,10 @@ void SparkiClass::drawCircle(uint8_t x0, uint8_t y0, uint8_t r) {
   int8_t x = 0;
   int8_t y = r;
 
-  my_setpixel(x0, y0+r, WHITE);
-  my_setpixel(x0, y0-r, WHITE);
-  my_setpixel(x0+r, y0, WHITE);
-  my_setpixel(x0-r, y0, WHITE);
+  my_setpixel(x0, y0+r, pixel_color);
+  my_setpixel(x0, y0-r, pixel_color);
+  my_setpixel(x0+r, y0, pixel_color);
+  my_setpixel(x0-r, y0, pixel_color);
 
   while (x<y) {
     if (f >= 0) {
@@ -1393,15 +1536,15 @@ void SparkiClass::drawCircle(uint8_t x0, uint8_t y0, uint8_t r) {
     ddF_x += 2;
     f += ddF_x;
   
-    my_setpixel(x0 + x, y0 + y, WHITE);
-    my_setpixel(x0 - x, y0 + y, WHITE);
-    my_setpixel(x0 + x, y0 - y, WHITE);
-    my_setpixel(x0 - x, y0 - y, WHITE);
+    my_setpixel(x0 + x, y0 + y, pixel_color);
+    my_setpixel(x0 - x, y0 + y, pixel_color);
+    my_setpixel(x0 + x, y0 - y, pixel_color);
+    my_setpixel(x0 - x, y0 - y, pixel_color);
     
-    my_setpixel(x0 + y, y0 + x, WHITE);
-    my_setpixel(x0 - y, y0 + x, WHITE);
-    my_setpixel(x0 + y, y0 - x, WHITE);
-    my_setpixel(x0 - y, y0 - x, WHITE);
+    my_setpixel(x0 + y, y0 + x, pixel_color);
+    my_setpixel(x0 - y, y0 + x, pixel_color);
+    my_setpixel(x0 + y, y0 - x, pixel_color);
+    my_setpixel(x0 - y, y0 - x, pixel_color);
     
   }
 }
@@ -1416,7 +1559,7 @@ void SparkiClass::drawCircleFilled(uint8_t x0, uint8_t y0, uint8_t r) {
   int8_t y = r;
 
   for (uint8_t i=y0-r; i<=y0+r; i++) {
-    my_setpixel(x0, i, WHITE);
+    my_setpixel(x0, i, pixel_color);
   }
 
   while (x<y) {
@@ -1430,12 +1573,12 @@ void SparkiClass::drawCircleFilled(uint8_t x0, uint8_t y0, uint8_t r) {
     f += ddF_x;
   
     for (uint8_t i=y0-y; i<=y0+y; i++) {
-      my_setpixel(x0+x, i, WHITE);
-      my_setpixel(x0-x, i, WHITE);
+      my_setpixel(x0+x, i, pixel_color);
+      my_setpixel(x0-x, i, pixel_color);
     } 
     for (uint8_t i=y0-x; i<=y0+x; i++) {
-      my_setpixel(x0+y, i, WHITE);
-      my_setpixel(x0-y, i, WHITE);
+      my_setpixel(x0+y, i, pixel_color);
+      my_setpixel(x0-y, i, pixel_color);
     }    
   }
 }
