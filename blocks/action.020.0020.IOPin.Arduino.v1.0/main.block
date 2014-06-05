@@ -8,12 +8,12 @@
     <code>
 		<dataType>void</dataType>
 		<initialCode>
-			<line0>DigitalWrite(</line0>
+			<line0>digitalWrite(</line0>
 		</initialCode>
 		<methodSeparator>, </methodSeparator>
 		<paramListStart></paramListStart>
 		<paramListEnd>);</paramListEnd>
-		<keywords1>DigitalWrite</keywords1>
+		<keywords1>digitalWrite</keywords1>
 	</code>
     <interface>
 		<originalSize>
