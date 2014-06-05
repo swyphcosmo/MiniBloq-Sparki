@@ -8,9 +8,9 @@
     <code>
 		<dataType>number</dataType>
 		<initialCode>
-			<line0>robot.ping_single()</line0>
+			<line0>sparki.ping_single()</line0>
 		</initialCode>
-		<keywords1>robot ping_single</keywords1>
+		<keywords1>sparki ping_single</keywords1>
 	</code>
     <interface>
 		<originalSize>
