@@ -5,7 +5,9 @@
 #include "Print.h"
 
 #define SHIFTREG_LATCH      TXLED0   // PD5
-#define STATUS_LED          13        
+#define STATUS_LED          13     
+// Hack for minibloq to allow STATUS_LED to appear as both an IOPin (for digitalWrite) and an analogWrite (for analogWrite)    
+#define STATUS_LED_PWM      STATUS_LED
 #define BUZZER              11       // PB7
 #define BUZZER_FREQ         2800
 #define ULTRASONIC_ECHO     5        // PC6

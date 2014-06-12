@@ -219,13 +219,15 @@
 		<sensor4 instanceType="analogRead"/>
 		<sensor5 instanceType="analogRead"/>
 
+		<STATUS_LED_PWM instanceType="analogWrite"/>
+<!--
 		<PWM3 instanceType="analogWrite"/>
 		<PWM5 instanceType="analogWrite"/>
 		<PWM6 instanceType="analogWrite"/>
 		<PWM9 instanceType="analogWrite"/>
 		<PWM10 instanceType="analogWrite"/>
 		<PWM11 instanceType="analogWrite"/>
-<!--
+
 		<D0 instanceType="IOPin"/>
 		<D1 instanceType="IOPin"/>
 		<D2 instanceType="IOPin"/>
@@ -246,6 +248,10 @@
 		<D17 instanceType="IOPin"/>
 		<D18 instanceType="IOPin"/>
 		<D19 instanceType="IOPin"/>
+
+		
 -->
+		<STATUS_LED instanceType="IOPin"/>
+
 	</instances>
 </board>
