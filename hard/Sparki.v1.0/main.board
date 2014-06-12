@@ -210,8 +210,7 @@
 		</cmd>
 	</deploy>
 	<instances>
-		<serial0 instanceType="Serial"/>
-		<serial1 instanceType="Serial"/>
+		<Serial instanceType="Serial"/>
 
 		<sensor0 instanceType="analogRead"/>
 		<sensor1 instanceType="analogRead"/>
@@ -226,7 +225,7 @@
 		<PWM9 instanceType="analogWrite"/>
 		<PWM10 instanceType="analogWrite"/>
 		<PWM11 instanceType="analogWrite"/>
-
+<!--
 		<D0 instanceType="IOPin"/>
 		<D1 instanceType="IOPin"/>
 		<D2 instanceType="IOPin"/>
@@ -247,5 +246,6 @@
 		<D17 instanceType="IOPin"/>
 		<D18 instanceType="IOPin"/>
 		<D19 instanceType="IOPin"/>
+-->
 	</instances>
 </board>
