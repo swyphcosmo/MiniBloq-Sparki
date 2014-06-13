@@ -8,12 +8,12 @@
     <code>
 		<dataType>void</dataType>
 		<initialCode>
-			<line0>AnalogWrite(</line0>
+			<line0>analogWrite(</line0>
 		</initialCode>
 		<methodSeparator>, </methodSeparator>
 		<paramListStart></paramListStart>
 		<paramListEnd>);</paramListEnd>
-		<keywords1>AnalogWrite</keywords1>
+		<keywords1>analogWrite</keywords1>
 	</code>
     <interface>
 		<originalSize>
