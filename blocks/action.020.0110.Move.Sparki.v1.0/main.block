@@ -56,8 +56,12 @@
 	<friends>
 		<moveForward>MoveForward</moveForward>
 		<moveBackward>MoveBackward</moveBackward>
-		<moveLeft>MoveLeft</moveLeft>
-		<moveRight>MoveRight</moveRight>
+		<movePivotTurnLeft>MovePivotTurnLeft</movePivotTurnLeft>
+		<movePivotTurnRight>MovePivotTurnRight</movePivotTurnRight>
+		<moveInPlaceTurnLeft>MoveInPlaceTurnLeft</moveInPlaceTurnLeft>
+		<moveInPlaceTurnRight>MoveInPlaceTurnRight</moveInPlaceTurnRight>
+		<moveCarTurnLeft>MoveCarTurnLeft</moveCarTurnLeft>
+		<moveCarTurnRight>MoveCarTurnRight</moveCarTurnRight>
 		<moveStop>MoveStop</moveStop>
 	</friends>
 </block>

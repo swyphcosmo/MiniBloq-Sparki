@@ -8,10 +8,11 @@
     <code>
 		<dataType>moveMethod</dataType>
 		<initialCode>
-			<line0>moveForward</line0>
+			<line0>driveForwardWait</line0>
 		</initialCode>
 		<paramListStart>( </paramListStart>
 		<paramListEnd> ); </paramListEnd>
+		<paramSeparator>, </paramSeparator>
 	</code>
     <interface>
 		<originalSize>
@@ -31,27 +32,36 @@
 		</defaultBackgroundColour1>
 		<picker>
 			<imagesBasePath>thisBlockPath::</imagesBasePath>
-			<default>Images/MoveForwardDefault.png</default>
-			<hover>Images/MoveForwardHover.png</hover>
-			<pressed>Images/MoveForwardPressed.png</pressed>
-			<disabled>Images/MoveForwardDisabled.png</disabled>
+			<default>Images/MoveRobotForwardDefault.png</default>
+			<hover>Images/MoveRobotForwardHover.png</hover>
+			<pressed>Images/MoveRobotForwardPressed.png</pressed>
+			<disabled>Images/MoveRobotForwardDisabled.png</disabled>
 		</picker>
 		<blockButton>
 			<has>true</has>
 			<imagesBasePath>thisBlockPath::</imagesBasePath>
-			<default>Images/MoveForwardBlockDefault.png</default>
-			<disabled>Images/MoveForwardBlockDisabled.png</disabled>
+			<default>Images/MoveRobotForwardBlockDefault.png</default>
+			<disabled>Images/MoveRobotForwardBlockDisabled.png</disabled>
 		</blockButton>
 	</interface>
 	<params>
-		<distance>
+		<distanceMM>
 			<dataType>number</dataType>
-			<imagesBasePath>themePath::</imagesBasePath>
-			<notAssigned>ParamNotAssigned.png</notAssigned>
-			<default>ParamDefault.png</default>
-			<hover>ParamHover.png</hover>
-			<pressed>ParamPressed.png</pressed>
-			<disabled>ParamDisabled.png</disabled>
-		</distance>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveDistanceBlockDefault.png</default>
+			<notAssigned>Images/MoveDistanceNotAssigned.png</notAssigned>
+			<hover>Images/MoveDistanceHover.png</hover>
+			<pressed>Images/MoveDistancePressed.png</pressed>
+			<disabled>Images/MoveDistanceDisabled.png</disabled>
+		</distanceMM>
+		<speed>
+			<dataType>number</dataType>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveSpeedBlockDefault.png</default>
+			<notAssigned>Images/MoveSpeedNotAssigned.png</notAssigned>
+			<hover>Images/MoveSpeedHover.png</hover>
+			<pressed>Images/MoveSpeedPressed.png</pressed>
+			<disabled>Images/MoveSpeedDisabled.png</disabled>
+		</speed>
 	</params>
 </block>

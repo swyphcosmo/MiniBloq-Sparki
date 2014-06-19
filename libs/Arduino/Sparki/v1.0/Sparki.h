@@ -475,9 +475,19 @@ public:
       int8_t  speedPercent = -1
     );
 
+    void driveForwardWait (
+      int16_t distanceToDriveMm = 0,
+      int8_t speedPercent = -1
+    );
+
     void driveBackward (
       int16_t distanceToDriveMm = 0,
       boolean waitUntilDone = true,
+      int8_t  speedPercent = -1
+    );
+
+    void driveBackwardWait (
+      int16_t distanceToDriveMm = 0,
       int8_t  speedPercent = -1
     );
 
@@ -492,6 +502,15 @@ public:
       int8_t  speedPercent = -1
     );
 
+    void spinLeftWait (
+      int16_t angleToSpinDeg = 0,
+      int8_t  speedPercent = -1
+    );
+    void spinRightWait (
+      int16_t angleToSpinDeg = 0,
+      int8_t  speedPercent = -1
+    );
+
     void turnLeft (
       int16_t angleToTurnDeg = 90,
       int16_t radiusOfTurnMm = SPARKI_TURN_RADIUS_DEFAULT_MM,
@@ -502,6 +521,41 @@ public:
       int16_t angleToTurnDeg = 90,
       int16_t radiusOfTurnMm = SPARKI_TURN_RADIUS_DEFAULT_MM,
       boolean waitUntilDone = true,
+      int8_t  speedPercent = -1
+    );
+
+    void turnLeftWait (
+      int16_t angleToTurnDeg = 90,
+      int16_t radiusOfTurnMm = SPARKI_TURN_RADIUS_DEFAULT_MM,
+      int8_t  speedPercent = -1
+    );
+    void turnRightWait (
+      int16_t angleToTurnDeg = 90,
+      int16_t radiusOfTurnMm = SPARKI_TURN_RADIUS_DEFAULT_MM,
+      int8_t  speedPercent = -1
+    );
+
+    void pivotTurnLeft (
+      int16_t angleToTurnDeg = 90,
+      int16_t radiusOfTurnMm = SPARKI_TURN_RADIUS_DEFAULT_MM,
+      boolean waitUntilDone = true,
+      int8_t  speedPercent = -1
+    );
+    void pivotTurnRight (
+      int16_t angleToTurnDeg = 90,
+      int16_t radiusOfTurnMm = SPARKI_TURN_RADIUS_DEFAULT_MM,
+      boolean waitUntilDone = true,
+      int8_t  speedPercent = -1
+    );
+
+    void pivotTurnLeftWait (
+      int16_t angleToTurnDeg = 90,
+      int16_t radiusOfTurnMm = SPARKI_TURN_RADIUS_DEFAULT_MM,
+      int8_t  speedPercent = -1
+    );
+    void pivotTurnRightWait (
+      int16_t angleToTurnDeg = 90,
+      int16_t radiusOfTurnMm = SPARKI_TURN_RADIUS_DEFAULT_MM,
       int8_t  speedPercent = -1
     );
 

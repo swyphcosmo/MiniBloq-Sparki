@@ -8,10 +8,11 @@
     <code>
 		<dataType>moveMethod</dataType>
 		<initialCode>
-			<line0>moveBackward</line0>
+			<line0>driveBackwardWait</line0>
 		</initialCode>
 		<paramListStart>( </paramListStart>
 		<paramListEnd> ); </paramListEnd>
+		<paramSeparator>, </paramSeparator>
 	</code>
     <interface>
 		<originalSize>
@@ -31,27 +32,36 @@
 		</defaultBackgroundColour1>
 		<picker>
 			<imagesBasePath>thisBlockPath::</imagesBasePath>
-			<default>Images/MoveBackwardDefault.png</default>
-			<hover>Images/MoveBackwardHover.png</hover>
-			<pressed>Images/MoveBackwardPressed.png</pressed>
-			<disabled>Images/MoveBackwardDisabled.png</disabled>
+			<default>Images/MoveRobotBackwardDefault.png</default>
+			<hover>Images/MoveRobotBackwardHover.png</hover>
+			<pressed>Images/MoveRobotBackwardPressed.png</pressed>
+			<disabled>Images/MoveRobotBackwardDisabled.png</disabled>
 		</picker>
 		<blockButton>
 			<has>true</has>
 			<imagesBasePath>thisBlockPath::</imagesBasePath>
-			<default>Images/MoveBackwardBlockDefault.png</default>
-			<disabled>Images/MoveBackwardBlockDisabled.png</disabled>
+			<default>Images/MoveRobotBackwardBlockDefault.png</default>
+			<disabled>Images/MoveRobotBackwardBlockDisabled.png</disabled>
 		</blockButton>
 	</interface>
 	<params>
-		<distance>
+		<distanceMM>
 			<dataType>number</dataType>
-			<imagesBasePath>themePath::</imagesBasePath>
-			<notAssigned>ParamNotAssigned.png</notAssigned>
-			<default>ParamDefault.png</default>
-			<hover>ParamHover.png</hover>
-			<pressed>ParamPressed.png</pressed>
-			<disabled>ParamDisabled.png</disabled>
-		</distance>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveDistanceBlockDefault.png</default>
+			<notAssigned>Images/MoveDistanceNotAssigned.png</notAssigned>
+			<hover>Images/MoveDistanceHover.png</hover>
+			<pressed>Images/MoveDistancePressed.png</pressed>
+			<disabled>Images/MoveDistanceDisabled.png</disabled>
+		</distanceMM>
+		<speed>
+			<dataType>number</dataType>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveSpeedBlockDefault.png</default>
+			<notAssigned>Images/MoveSpeedNotAssigned.png</notAssigned>
+			<hover>Images/MoveSpeedHover.png</hover>
+			<pressed>Images/MoveSpeedPressed.png</pressed>
+			<disabled>Images/MoveSpeedDisabled.png</disabled>
+		</speed>
 	</params>
 </block>

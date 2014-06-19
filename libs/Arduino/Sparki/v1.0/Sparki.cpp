@@ -1127,6 +1127,17 @@ void SparkiClass::driveForward (
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+void SparkiClass::driveForwardWait (
+  int16_t  distanceToDriveMm,
+  int8_t   speedPercent
+) {
+
+  drive ( distanceToDriveMm, true, true, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 void SparkiClass::driveBackward (
   int16_t  distanceToDriveMm,
   boolean  waitUntilDone,
@@ -1134,6 +1145,17 @@ void SparkiClass::driveBackward (
 ) {
 
   drive ( distanceToDriveMm, false, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::driveBackwardWait (
+  int16_t  distanceToDriveMm,
+  int8_t   speedPercent
+) {
+
+  drive ( distanceToDriveMm, false, true, speedPercent );
 
 }
 
@@ -1208,6 +1230,28 @@ void SparkiClass::spinRight (
 ) {
 
   spin ( angleToSpinDeg, SPARKI_MOTOR_DIR_CLOCKWISE, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::spinLeftWait (
+  int16_t angleToSpinDeg,
+  int8_t  speedPercent
+) {
+
+  spin ( angleToSpinDeg, SPARKI_MOTOR_DIR_COUNTERCLOCKWISE, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::spinRightWait (
+  int16_t angleToSpinDeg,
+  int8_t  speedPercent
+) {
+
+  spin ( angleToSpinDeg, SPARKI_MOTOR_DIR_CLOCKWISE, speedPercent );
 
 }
 
@@ -1412,6 +1456,81 @@ void SparkiClass::turnRight (
 ) {
 
   turn ( angleToTurnDeg, true, radiusOfTurnMm, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::turnLeftWait (
+  int16_t angleToTurnDeg,
+  int16_t radiusOfTurnMm,
+  int8_t  speedPercent
+) {
+
+  turn ( angleToTurnDeg, false, radiusOfTurnMm, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::turnRightWait (
+  int16_t angleToTurnDeg,
+  int16_t radiusOfTurnMm,
+  int8_t  speedPercent
+) {
+
+  turn ( angleToTurnDeg, true, radiusOfTurnMm, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::pivotTurnLeft (
+  int16_t angleToTurnDeg,
+  int16_t radiusOfTurnMm,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  // halfWheelSeparationMm = wheelSeparationUmEff / 20;
+  turn ( angleToTurnDeg, false, wheelSeparationUmEff / 20, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::pivotTurnRight (
+  int16_t angleToTurnDeg,
+  int16_t radiusOfTurnMm,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  turn ( angleToTurnDeg, true, wheelSeparationUmEff / 20, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::pivotTurnLeftWait (
+  int16_t angleToTurnDeg,
+  int16_t radiusOfTurnMm,
+  int8_t  speedPercent
+) {
+
+  turn ( angleToTurnDeg, false, wheelSeparationUmEff / 20, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::pivotTurnRightWait (
+  int16_t angleToTurnDeg,
+  int16_t radiusOfTurnMm,
+  int8_t  speedPercent
+) {
+
+  turn ( angleToTurnDeg, true, wheelSeparationUmEff / 20, speedPercent );
 
 }
 

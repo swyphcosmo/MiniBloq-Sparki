@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<block xmlns="http://block.namespaces.minibloq.org" xmlns:minibloq="http://minibloq.org" MinibloqVersion="0.8.Beta">
+    <properties>
+		<name>MoveCarTurnLeft</name>
+		<function>Setter</function>
+		<loadAction>load</loadAction>
+    </properties>
+    <code>
+		<dataType>moveMethod</dataType>
+		<initialCode>
+			<line0>turnLeftWait</line0>
+		</initialCode>
+		<paramListStart>( </paramListStart>
+		<paramListEnd> ); </paramListEnd>
+		<paramSeparator>, </paramSeparator>
+	</code>
+    <interface>
+		<originalSize>
+			<width>operationDefaultWidth::</width>
+			<height>blockDefaultHeight::</height>
+		</originalSize>
+        <childFactor>0.9</childFactor>
+        <defaultBackgroundColour0>
+			<R>68</R>
+			<G>162</G>
+			<B>53</B>
+		</defaultBackgroundColour0>
+        <defaultBackgroundColour1>
+			<R>52</R>
+			<G>123</G>
+			<B>42</B>
+		</defaultBackgroundColour1>
+		<picker>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveCarTurnLeftDefault.png</default>
+			<hover>Images/MoveCarTurnLeftHover.png</hover>
+			<pressed>Images/MoveCarTurnLeftPressed.png</pressed>
+			<disabled>Images/MoveCarTurnLeftDisabled.png</disabled>
+		</picker>
+		<blockButton>
+			<has>true</has>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveCarTurnLeftBlockDefault.png</default>
+			<disabled>Images/MoveCarTurnLeftBlockDisabled.png</disabled>
+		</blockButton>
+	</interface>
+	<params>
+		<angle>
+			<dataType>number</dataType>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveAngleBlockDefault.png</default>
+			<notAssigned>Images/MoveAngleNotAssigned.png</notAssigned>
+			<hover>Images/MoveAngleHover.png</hover>
+			<pressed>Images/MoveAnglePressed.png</pressed>
+			<disabled>Images/MoveAngleDisabled.png</disabled>
+		</angle>
+		<radius>
+			<dataType>number</dataType>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveRadiusBlockDefault.png</default>
+			<notAssigned>Images/MoveRadiusNotAssigned.png</notAssigned>
+			<hover>Images/MoveRadiusHover.png</hover>
+			<pressed>Images/MoveRadiusPressed.png</pressed>
+			<disabled>Images/MoveRadiusDisabled.png</disabled>
+		</radius>
+		<speed>
+			<dataType>number</dataType>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveSpeedBlockDefault.png</default>
+			<notAssigned>Images/MoveSpeedNotAssigned.png</notAssigned>
+			<hover>Images/MoveSpeedHover.png</hover>
+			<pressed>Images/MoveSpeedPressed.png</pressed>
+			<disabled>Images/MoveSpeedDisabled.png</disabled>
+		</speed>
+	</params>
+</block>
