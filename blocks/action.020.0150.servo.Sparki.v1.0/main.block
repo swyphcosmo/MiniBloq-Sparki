@@ -14,7 +14,7 @@
 	</code>
     <interface>
 		<originalSize>
-			<width>80</width>
+			<width>blockDefaultWidth::</width>
 			<height>blockDefaultHeight::</height>
 		</originalSize>
         <childFactor>0.9</childFactor>
@@ -44,7 +44,7 @@
 	</interface>
 	<params>
 		<angle>
-			<dataType>servoMethod</dataType>
+			<dataType>number</dataType>
 			<imagesBasePath>themePath::</imagesBasePath>
 			<notAssigned>ParamNotAssigned.png</notAssigned>
 			<default>ParamDefault.png</default>
@@ -53,10 +53,10 @@
 			<disabled>ParamDisabled.png</disabled>
 		</angle>
 	</params>
-	<friends>
+<!-- 	<friends>
 		<servoAngle>ServoAngle</servoAngle>
 		<servoLeft>ServoLeft</servoLeft>
 		<servoCenter>ServoCenter</servoCenter>
 		<servoRight>ServoRight</servoRight>
-	</friends>
+	</friends> -->
 </block>
