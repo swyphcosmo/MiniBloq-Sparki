@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<block xmlns="http://block.namespaces.minibloq.org" xmlns:minibloq="http://minibloq.org" MinibloqVersion="0.8.Beta">
+    <properties>
+		<name>ServoAngle</name>
+		<function>Setter</function>
+		<loadAction>load</loadAction>
+    </properties>
+    <code>
+		<dataType>servoMethod</dataType>
+		<initialCode>
+			<line0>servo</line0>
+		</initialCode>
+		<paramListStart>( </paramListStart>
+		<paramListEnd> ); </paramListEnd>
+	</code>
+    <interface>
+		<originalSize>
+			<width>operationDefaultWidth::</width>
+			<height>blockDefaultHeight::</height>
+		</originalSize>
+        <childFactor>0.9</childFactor>
+        <defaultBackgroundColour0>
+			<R>68</R>
+			<G>162</G>
+			<B>53</B>
+		</defaultBackgroundColour0>
+        <defaultBackgroundColour1>
+			<R>52</R>
+			<G>123</G>
+			<B>42</B>
+		</defaultBackgroundColour1>
+		<picker>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/ServoAngleDefault.png</default>
+			<hover>Images/ServoAngleHover.png</hover>
+			<pressed>Images/ServoAnglePressed.png</pressed>
+			<disabled>Images/ServoAngleDisabled.png</disabled>
+		</picker>
+		<blockButton>
+			<has>true</has>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/ServoAngleBlockDefault.png</default>
+			<disabled>Images/ServoAngleBlockDisabled.png</disabled>
+		</blockButton>
+	</interface>
+	<params>
+		<distance>
+			<dataType>number</dataType>
+			<imagesBasePath>themePath::</imagesBasePath>
+			<notAssigned>ParamNotAssigned.png</notAssigned>
+			<default>ParamDefault.png</default>
+			<hover>ParamHover.png</hover>
+			<pressed>ParamPressed.png</pressed>
+			<disabled>ParamDisabled.png</disabled>
+		</distance>
+	</params>
+</block>
