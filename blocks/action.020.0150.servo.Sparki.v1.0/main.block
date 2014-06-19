@@ -1,19 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <block xmlns="http://block.namespaces.minibloq.org" xmlns:minibloq="http://minibloq.org" MinibloqVersion="0.8.Beta">
     <properties>
-		<name>servo</name>
+		<name>Servo</name>
 		<function>Setter</function>
 		<loadAction>load</loadAction>
     </properties>
     <code>
 		<dataType>void</dataType>
 		<initialCode>
-			<line0>sparki.servo(</line0>
+			<line0>sparki</line0>
 		</initialCode>
-		<methodSeparator>(int)(</methodSeparator>
-		<paramListStart></paramListStart>
-		<paramListEnd>);</paramListEnd>
-		<keywords1>sparki servo</keywords1>
+		<paramListStart>.</paramListStart>
 	</code>
     <interface>
 		<originalSize>
@@ -22,32 +19,32 @@
 		</originalSize>
         <childFactor>0.9</childFactor>
         <defaultBackgroundColour0>
-			<R>setterBlockColour0R::</R>
-			<G>setterBlockColour0G::</G>
-			<B>setterBlockColour0B::</B>
+			<R>68</R>
+			<G>162</G>
+			<B>53</B>
 		</defaultBackgroundColour0>
         <defaultBackgroundColour1>
-			<R>setterBlockColour1R::</R>
-			<G>setterBlockColour1G::</G>
-			<B>setterBlockColour1B::</B>
+			<R>52</R>
+			<G>123</G>
+			<B>42</B>
 		</defaultBackgroundColour1>
 		<picker>
 			<imagesBasePath>thisBlockPath::</imagesBasePath>
-			<default>Images/BlockDefault.png</default>
-			<hover>Images/BlockHover.png</hover>
-			<pressed>Images/BlockPressed.png</pressed>
-			<disabled>Images/BlockDisabled.png</disabled>
+			<default>Images/ServoDefault.png</default>
+			<hover>Images/ServoHover.png</hover>
+			<pressed>Images/ServoPressed.png</pressed>
+			<disabled>Images/ServoDisabled.png</disabled>
 		</picker>
 		<blockButton>
 			<has>true</has>
 			<imagesBasePath>thisBlockPath::</imagesBasePath>
-			<default>Images/Block.png</default>
-			<disabled>Images/Block.png</disabled>
+			<default>Images/ServoBlockDefault.png</default>
+			<disabled>Images/ServoBlockDisabled.png</disabled>
 		</blockButton>
 	</interface>
 	<params>
 		<angle>
-			<dataType>number</dataType>
+			<dataType>servoMethod</dataType>
 			<imagesBasePath>themePath::</imagesBasePath>
 			<notAssigned>ParamNotAssigned.png</notAssigned>
 			<default>ParamDefault.png</default>
@@ -56,4 +53,10 @@
 			<disabled>ParamDisabled.png</disabled>
 		</angle>
 	</params>
+	<friends>
+		<servoAngle>ServoAngle</servoAngle>
+		<servoLeft>ServoLeft</servoLeft>
+		<servoCenter>ServoCenter</servoCenter>
+		<servoRight>ServoRight</servoRight>
+	</friends>
 </block>
