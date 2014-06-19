@@ -18,14 +18,14 @@
 		</originalSize>
         <childFactor>0.9</childFactor>
         <defaultBackgroundColour0>
-			<R>setterBlockColour0R::</R>
-			<G>setterBlockColour0G::</G>
-			<B>setterBlockColour0B::</B>
+			<R>57</R>
+			<G>102</G>
+			<B>177</B>
 		</defaultBackgroundColour0>
         <defaultBackgroundColour1>
-			<R>setterBlockColour1R::</R>
-			<G>setterBlockColour1G::</G>
-			<B>setterBlockColour1B::</B>
+			<R>45</R>
+			<G>93</G>
+			<B>138</B>
 		</defaultBackgroundColour1>
 		<picker>
 			<imagesBasePath>thisBlockPath::</imagesBasePath>
