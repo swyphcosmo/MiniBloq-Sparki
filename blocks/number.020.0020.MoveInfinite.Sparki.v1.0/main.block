@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<block xmlns="http://block.namespaces.minibloq.org" xmlns:minibloq="http://minibloq.org" MinibloqVersion="0.8.Beta">
+    <properties>
+		<name>MoveInfinite</name>
+		<function>Constant</function>
+		<loadAction>load</loadAction>
+    </properties>
+    <code>
+		<dataType>number</dataType>
+		<initialCode>
+			<line0></line0>
+		</initialCode>
+	</code>
+    <interface>
+		<originalSize>
+			<width>smallGettersDefaultWidth::</width>
+			<height>blockDefaultHeight::</height>
+		</originalSize>
+        <childFactor>0.9</childFactor>
+        <defaultBackgroundColour0>
+			<R>68</R>
+			<G>162</G>
+			<B>53</B>
+		</defaultBackgroundColour0>
+        <defaultBackgroundColour1>
+			<R>52</R>
+			<G>123</G>
+			<B>42</B>
+		</defaultBackgroundColour1>
+		<picker>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveInfiniteDefault.png</default>
+			<hover>Images/MoveInfiniteHover.png</hover>
+			<pressed>Images/MoveInfinitePressed.png</pressed>
+			<disabled>Images/MoveInfiniteDisabled.png</disabled>
+		</picker>
+		<blockButton>
+			<has>true</has>
+			<imagesBasePath>thisBlockPath::</imagesBasePath>
+			<default>Images/MoveInfiniteBlockDefault.png</default>
+			<disabled>Images/MoveInfiniteBlockDisabled.png</disabled>
+		</blockButton>
+	</interface>
+</block>
