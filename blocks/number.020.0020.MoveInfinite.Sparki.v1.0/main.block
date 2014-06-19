@@ -8,7 +8,7 @@
     <code>
 		<dataType>number</dataType>
 		<initialCode>
-			<line0></line0>
+			<line0>0</line0>
 		</initialCode>
 	</code>
     <interface>
