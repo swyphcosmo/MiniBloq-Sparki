@@ -14,32 +14,6 @@
 #include "SparkiEEPROM.h"
 #include "Sparkii2c.h"
 
-static int8_t step_dir[3];                 // -1 = ccw, 1 = cw  
-
-static uint8_t motor_speed[3];              // stores last set motor speed (0-100%)
-
-uint8_t pixel_color = WHITE;
-
-uint8_t ir_active = 1;
-
-static volatile uint8_t move_speed = 100;
-static volatile uint8_t speed_index[3];
-static volatile uint8_t speed_array[3][SPEED_ARRAY_LENGTH];    
-                                        // for each motor, how many 200uS waits between each step. 
-                                        // Cycles through an array of 10 of these counts to average 
-                                        // for better speed control
-
-
-static volatile int8_t step_index[3];       // index into _steps array  
-static uint8_t _steps_right[9];                   // bytes defining stepper coil activations
-static uint8_t _steps_left[9];                   // bytes defining stepper coil activations
-static volatile uint32_t remainingSteps[3]; // number of steps before stopping motor
-static volatile uint32_t isRunning[3];      // tells if motor is running
-
-static volatile int speedCounter[3];      // variable used in maintaing speed
-static volatile int speedCount[3];      // what speedCount is set at when speed cycle resets
-
-static volatile uint8_t shift_outputs[3];      // tells if motor is running
 
 // initialize the RGB timer variables
 static volatile uint8_t RGB_vals[3];
@@ -68,6 +42,7 @@ volatile uint8_t mag_buffer[RawMagDataLength];
 volatile int8_t servo_deg_offset = 0;
 
 SparkiClass sparki;
+
 
 SparkiClass::SparkiClass()
 {
@@ -123,51 +98,46 @@ void SparkiClass::begin( ) {
   
   // Clear out the shift registers
   PORTD &= 0xDF;    // pull PD5 low
-  SPI.transfer(shift_outputs[1]);
-  SPI.transfer(shift_outputs[0]);
+  SPI.transfer(0x00);
+  SPI.transfer(0x00);
   PORTD |= 0x20;    // pull PD5 high to latch in spi transfers
 
 
   // Setup the IR Switch
   irSwitch = 0;
 
-  // defining steps for the stepper motors
-  _steps_left[0] = 0x10;
-  _steps_left[1] = 0x30;
-  _steps_left[2] = 0x20;
-  _steps_left[3] = 0x60;
-  _steps_left[4] = 0x40;
-  _steps_left[5] = 0xC0;
-  _steps_left[6] = 0x80;
-  _steps_left[7] = 0x90;
-  _steps_left[8]  = 0x00;
-
-  _steps_right[0] = 0x01;
-  _steps_right[1] = 0x03;
-  _steps_right[2] = 0x02;
-  _steps_right[3] = 0x06;
-  _steps_right[4] = 0x04;
-  _steps_right[5] = 0x0C;
-  _steps_right[6] = 0x08;
-  _steps_right[7] = 0x09;
-  _steps_right[8] = 0x00;
-
   beginDisplay();
   updateLCD();
 
-  // Setup initial Stepper settings
-  motor_speed[MOTOR_LEFT] = motor_speed[MOTOR_RIGHT] = motor_speed[MOTOR_GRIPPER] = move_speed;
+  // BEGIN: Motor Setup
+
+  initMotorControlWord ( SPARKI_MOTOR_ID_MASK_ALL, 0x11 );
+  initMotorStatusWord  ( SPARKI_MOTOR_ID_MASK_ALL, 0x00 );
+
+  wheelDiameterUmEff   = SPARKI_WHEEL_DIAMETER_BASELINE_UM;
+  wheelSeparationUmEff = SPARKI_WHEEL_SEPARATION_BASELINE_UM;
+
+  driveMmToStepsEffFp = SPARKI_MOTOR_DRIVE_MM_TO_STEPS_FP;
+  spinDegToStepsEffFp = SPARKI_MOTOR_SPIN_DEG_TO_STEPS_FP;
+  turnRadMmAngleDegToStepsEffFp = SPARKI_TURN_RADIUSMM_ANGLEDEG_TO_STEPS_FP;
+
+  wheelSpeedPercentDefault   = SPARKI_MOTOR_SPEED_DEFAULT_PERCENT;
+  gripperSpeedPercentDefault = SPARKI_MOTOR_SPEED_DEFAULT_PERCENT;
+
+  distanceOfZeroMeansInfinity = true;
+  gripperSpacingMm = -1;
+
+  // END: Motor Setup
   
-  // Set up the scheduler routine to run every 200uS, based off Timer4 interrupt
+  // Set up the scheduler routine to run every 100uS, based off Timer4 interrupt
   cli();          // disable all interrupts
   TCCR4A = 0;
   TCCR4B = 0;
   TCNT4  = 0;
 
-  OCR4A = 48;               // compare match register 64MHz/2048 = 31250hz
-  //TCCR4B |= (1 << WGM12);   // CTC mode
-  TCCR4B = 0x06;
-  //TCCR4B = _BV(CS43) | _BV(CS42);            // CLK/2048 prescaler
+  OCR4A = 48;               // compare match register 16MHz/32/10000Hz
+  TCCR4B |= (1 << WGM12);   // CTC mode
+  TCCR4B = 0x06;            // CLK/32 prescaler (32 = 2^(0110-1))
   TIMSK4 |= (1 << OCIE4A);  // enable Timer4 compare interrupt A
   sei();             // enable all interrupts
   
@@ -183,8 +153,8 @@ void SparkiClass::begin( ) {
   
   initAccelerometer();
   
-  WireWrite(ConfigurationRegisterB, (0x01 << 5));
-  WireWrite(ModeRegister, Measurement_Continuous);  
+   WireWrite(ConfigurationRegisterB, (0x01 << 5));
+   WireWrite(ModeRegister, Measurement_Continuous);  
   readMag(); // warm it up  
 
 }
@@ -286,7 +256,7 @@ int SparkiClass::diffIR(int pin0, int pin1, int pin2){
 }
 
 void SparkiClass::beep(){
-    tone(BUZZER, BUZZER_FREQ, 200);
+    tone(BUZZER, 4000, 200);
 }
 
 void SparkiClass::beep(int freq){
@@ -300,6 +270,12 @@ void SparkiClass::beep(int freq, int time){
 void SparkiClass::noBeep(){
     noTone(BUZZER);
 }
+
+
+/*
+ * motor control (non-blocking, except when moving distances)
+ * speed is percent 0-100
+*/
 
 void SparkiClass::RGB(uint8_t R, uint8_t G, uint8_t B)
 {
@@ -317,219 +293,1427 @@ void SparkiClass::RGB(uint8_t R, uint8_t G, uint8_t B)
 	RGB_vals[2] = B;
 }
 
-/*
- * motor control (non-blocking, except when moving distances)
- * speed is percent 0-100
-*/
+// ----------------------------------------------------------------------------
+// Motor Control: Setup and Support Functions
+// ----------------------------------------------------------------------------
 
-void SparkiClass::moveRight(float deg)
-{
-  unsigned long steps = STEPS_PER_DEGREE*deg;
-  if(deg == 0){
-      moveRight();
+void SparkiClass::primeMotors () {
+
+  cli ();
+  setupMotorForSteps (
+    SPARKI_MOTOR_ID_MASK_WHEEL_LEFT,
+    SPARKI_MOTOR_PRIMING_STEPS,
+    SPARKI_MOTOR_DIR_COUNTERCLOCKWISE,
+    SPARKI_MOTOR_SPEED_DEFAULT_PERCENT,
+    true
+  );
+  setupMotorForSteps (
+    SPARKI_MOTOR_ID_MASK_WHEEL_RIGHT,
+    SPARKI_MOTOR_PRIMING_STEPS,
+    SPARKI_MOTOR_DIR_CLOCKWISE,
+    SPARKI_MOTOR_SPEED_DEFAULT_PERCENT,
+    true
+  );
+  setupMotorForSteps (
+    SPARKI_MOTOR_ID_MASK_GRIPPER,
+    SPARKI_MOTOR_PRIMING_STEPS,
+    SPARKI_MOTOR_DIR_COUNTERCLOCKWISE,
+    SPARKI_MOTOR_SPEED_DEFAULT_PERCENT,
+    true
+  );
+  sei ();
+
+  startMotorRotation ( SPARKI_MOTOR_ID_MASK_ALL, true );
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::initMotorControlWord (
+  uint8_t motorIdMask,
+  byte    initValue
+) {
+
+  initMotorWord ( motorControlWord, motorIdMask, initValue );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::initMotorStatusWord (
+  uint8_t motorIdMask,
+  byte    initValue
+) {
+
+  initMotorWord ( motorStatusWord, motorIdMask, initValue );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::initMotorWord (
+  volatile byte *  motorWord,
+           uint8_t motorIdMask,
+           byte    initValue
+) {
+
+  uint8_t motorIndex;
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  motorIndex = 0;
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+      motorWord[motorIndex] = initValue;
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
   }
-  else{
-      if(deg < 0){
-        moveLeft(deg);
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::modifyMotorControlWordBit (
+  byte    motorIdMask,
+  byte    bitSelectMask,
+  boolean bitValue,
+  boolean motorIdIsIndex
+) {
+
+  modifyMotorWordBit ( motorControlWord, motorIdMask, bitSelectMask, bitValue, motorIdIsIndex );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::modifyMotorStatusWordBit (
+  byte    motorIdMask,
+  byte    bitSelectMask,
+  boolean bitValue,
+  boolean motorIdIsIndex
+) {
+
+  modifyMotorWordBit ( motorStatusWord, motorIdMask, bitSelectMask, bitValue, motorIdIsIndex );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::modifyMotorWordBit (
+  volatile byte *  motorWord,  // pointer to array of motor words
+           byte    motorIdMask,
+           byte    bitSelectMask,
+           boolean bitValue,
+           boolean motorIdIsIndex
+) {
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  if ( motorIdIsIndex ) {
+
+    if ( bitValue ) motorWord[motorIdMask] |=   bitSelectMask;
+    else            motorWord[motorIdMask] &= ~ bitSelectMask;
+
+  }  // if ( motorIdIsIndex )
+  else {
+
+    uint8_t motorIndex;
+
+    motorIndex = 0;
+    while ( motorIdMask != 0x00 ) {
+      if ( motorIdMask & 0x01 ) {
+        if ( bitValue ) motorWord[motorIndex] |=   bitSelectMask;
+        else            motorWord[motorIndex] &= ~ bitSelectMask;
       }
-      else{
-          stepRight(steps);
-          while( areMotorsRunning() ){
-            delay(1);
-          }
-      }
+      motorIdMask >>= 1;
+      motorIndex++;
+    }
+
+  }  // if ( motorIdIsIndex ) ... else
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::setWheelDiameter (
+  uint16_t wheelDiameterUm
+) {
+
+  wheelDiameterUmEff = wheelDiameterUm;
+
+  updateDriveMmToStepsFactor ();
+  updateSpinDegToStepsFactor ();
+
+  updateTurnRadMmAngleDegToStepsFactor ();
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::setWheelSeparation (
+  uint16_t wheelSeparationUm
+) {
+
+  wheelSeparationUmEff = wheelSeparationUm;
+
+  updateSpinDegToStepsFactor ();
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::updateDriveMmToStepsFactor () {
+
+  uint16_t wheelDiaRatioFp;
+
+  wheelDiaRatioFp = ( (uint32_t) SPARKI_WHEEL_DIAMETER_BASELINE_UM << 15 ) / wheelDiameterUmEff;
+
+  driveMmToStepsEffFp = ( (uint32_t) SPARKI_MOTOR_DRIVE_MM_TO_STEPS_FP * wheelDiaRatioFp + ( 1 << 14 ) ) >> 15;
+
+  // NOTE: Above fixed-pint precision of 15 bits assumes that wheel
+  // diameter does not exceed 10 bits; with actual Sparki wheel
+  // diameter around 51.0mm or 510 mm/10, this requirement is met.
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::updateSpinDegToStepsFactor () {
+
+  uint16_t wheelDiaRatioFp;
+  uint16_t wheelSepRatioFp;
+  uint16_t compoundRatioFp;
+
+  wheelDiaRatioFp = ( (uint32_t) SPARKI_WHEEL_DIAMETER_BASELINE_UM << 15 ) / wheelDiameterUmEff;
+  wheelSepRatioFp = ( (uint32_t) wheelSeparationUmEff << 15 ) / SPARKI_WHEEL_SEPARATION_BASELINE_UM;
+  compoundRatioFp = ( (uint32_t) wheelDiaRatioFp * wheelSepRatioFp ) >> 15;
+
+  spinDegToStepsEffFp = ( (uint32_t) SPARKI_MOTOR_SPIN_DEG_TO_STEPS_FP * compoundRatioFp + ( 1 << 14 ) ) >> 15;
+
+  // NOTE: Above fixed-pint precision of 15 bits assumes that wheel
+  // diameter and separation do not exceed 10 bits each; with
+  // Sparki wheel diameter around 51.0mm or 510 mm/10 and separation
+  // around 85.5 mm or 855 mm/10, this requirement is met.
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::updateTurnRadMmAngleDegToStepsFactor () {
+
+  uint16_t wheelDiaRatioFp;
+
+  wheelDiaRatioFp = ( (uint32_t) SPARKI_WHEEL_DIAMETER_BASELINE_UM << 15 ) / wheelDiameterUmEff;
+
+  turnRadMmAngleDegToStepsEffFp = ( (uint32_t) SPARKI_TURN_RADIUSMM_ANGLEDEG_TO_STEPS_FP * wheelDiaRatioFp + ( 1 << 14 ) ) >> 15;
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::enableActiveHoldForWheels (
+  boolean enableActiveHold
+) {
+
+  enableActiveMotorHold ( SPARKI_MOTOR_ID_MASK_WHEELS, enableActiveHold );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::enableActiveHoldForGripper (
+  boolean enableActiveHold
+) {
+
+  enableActiveMotorHold ( SPARKI_MOTOR_ID_MASK_GRIPPER, enableActiveHold );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::activeHoldIsEnabledForWheels () {
+
+  return activeMotorHoldIsEnabledForAny ( SPARKI_MOTOR_ID_MASK_WHEELS );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::activeHoldIsEnabledForGripper () {
+
+  return activeMotorHoldIsEnabledForAny ( SPARKI_MOTOR_ID_MASK_GRIPPER );
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::enableActiveMotorHold (
+  byte    motorIdMask, 
+  boolean enableActiveHold
+) {
+
+  modifyMotorStatusWordBit ( motorIdMask, SPARKI_MOTOR_STATUS_MASK_ACT_HOLD_IS_ON, enableActiveHold );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::activeMotorHoldIsEnabledForAny (
+  byte motorIdMask
+) {
+
+  boolean activeHoldIsOn;
+  uint8_t motorIndex;
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  activeHoldIsOn = false;
+
+  motorIndex = 0;
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+       activeHoldIsOn = activeHoldIsOn || ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_ACT_HOLD_IS_ON );
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
   }
+
+  return activeHoldIsOn;
+
 }
 
-void SparkiClass::stepRight(unsigned long steps)
-{
-  motorRotate(MOTOR_LEFT, DIR_CCW, move_speed, steps);
-  motorRotate(MOTOR_RIGHT, DIR_CCW, move_speed, steps);
+// ----------------------------------------------------------------------------
+
+void SparkiClass::enableBacklashCompForWheels (
+  boolean enableBacklashComp
+) {
+
+  enableMotorBacklashComp ( SPARKI_MOTOR_ID_MASK_WHEELS, enableBacklashComp );
+
 }
 
-void SparkiClass::moveRight()
-{
-  motorRotate(MOTOR_LEFT, DIR_CCW, move_speed, ULONG_MAX);
-  motorRotate(MOTOR_RIGHT, DIR_CCW, move_speed, ULONG_MAX);
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::enableBacklashCompForGripper (
+  boolean enableBacklashComp
+) {
+
+  enableMotorBacklashComp ( SPARKI_MOTOR_ID_MASK_GRIPPER, enableBacklashComp );
+
 }
 
-void SparkiClass::moveLeft(float deg)
-{
-  unsigned long steps = STEPS_PER_DEGREE*deg;
-  if(deg == 0){
-      moveLeft();
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::backlashCompIsEnabledForWheels () {
+
+  return motorBacklashCompIsEnabledForAny ( SPARKI_MOTOR_ID_MASK_WHEELS );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::backlashCompIsEnabledForGripper () {
+
+  return motorBacklashCompIsEnabledForAny ( SPARKI_MOTOR_ID_MASK_GRIPPER );
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::enableMotorBacklashComp (
+  byte    motorIdMask, 
+  boolean enableBacklashComp
+) {
+
+  if ( enableBacklashComp ) {
+    modifyMotorStatusWordBit ( motorIdMask, SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_ON, true );
   }
-  else{
-      if(deg < 0){
-        moveRight(deg);
-      }
-      else{
-          stepLeft(steps);
-          while( areMotorsRunning() ){
-            delay(1);
-          }
-      }
+  else {
+    modifyMotorStatusWordBit (
+      motorIdMask,
+      SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_ON | SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_PEND, 
+      false
+    );
   }
+
 }
 
-void SparkiClass::stepLeft(unsigned long steps)
-{
-  motorRotate(MOTOR_LEFT,  DIR_CW, move_speed, steps);
-  motorRotate(MOTOR_RIGHT, DIR_CW, move_speed, steps);
-}
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-void SparkiClass::moveLeft()
-{
-  motorRotate(MOTOR_LEFT,  DIR_CW, move_speed, ULONG_MAX);
-  motorRotate(MOTOR_RIGHT, DIR_CW, move_speed, ULONG_MAX);
-}
+boolean SparkiClass::motorBacklashCompIsEnabledForAny (
+  byte motorIdMask
+) {
 
-void SparkiClass::moveForward(float cm)
-{
-  unsigned long steps = STEPS_PER_CM*cm;
-  if(cm == 0){
-      moveForward();
+  boolean backlashCompIsOn;
+  uint8_t motorIndex;
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  backlashCompIsOn = false;
+
+  motorIndex = 0;
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+       backlashCompIsOn = backlashCompIsOn || ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_ON );
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
   }
-  else{
-      if(cm < 0){
-        moveBackward(cm);
+  
+  return backlashCompIsOn;
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::performMotorBacklashCompensation (
+  byte motorIdMask
+) {
+
+  uint8_t  motorIndex;
+  byte     motorIdMaskForBlComp;
+  uint32_t savedStepCount[SPARKI_MOTOR_COUNT];
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+  motorIdMaskForBlComp = motorIdMask;
+
+  motorIndex = 0;
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+      if ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_PEND ) {
+        savedStepCount[motorIndex] = motorRemainingSteps[motorIndex];
+        motorRemainingSteps[motorIndex] = SPARKI_MOTOR_STEPS_OF_BACKLASH;
       }
-      else{
-          stepForward(steps);
-          while( areMotorsRunning() ){
-            delay(1);
-          }
+      else {
+        motorIdMaskForBlComp &= ~ ( 0x01 << motorIndex );
       }
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
   }
-}
 
-void SparkiClass::stepForward(unsigned long steps)
-{
-  motorRotate(MOTOR_LEFT, DIR_CCW, move_speed, steps);
-  motorRotate(MOTOR_RIGHT, DIR_CW, move_speed, steps);
-}
+  if ( motorIdMaskForBlComp != 0x00 ) {
 
-void SparkiClass::moveForward()
-{
-  motorRotate(MOTOR_LEFT, DIR_CCW, move_speed, ULONG_MAX);
-  motorRotate(MOTOR_RIGHT, DIR_CW, move_speed, ULONG_MAX);
-}
+    cli ();
+    modifyMotorStatusWordBit ( motorIdMaskForBlComp, SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING, true );
+    sei ();
+    while ( anyMotorIsRunning(motorIdMaskForBlComp) ) delay ( 10 );
 
-void SparkiClass::moveBackward(float cm)
-{
-  unsigned long steps = STEPS_PER_CM*cm;
-  if(cm == 0){
-      moveBackward();
-  }
-  else{
-      if(cm < 0){
-        moveForward(cm);
+    motorIndex = 0;
+    while ( motorIdMaskForBlComp != 0x00 ) {
+      if ( motorIdMaskForBlComp & 0x01 ) {
+        modifyMotorStatusWordBit ( motorIndex, SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_PEND, false, true );
+        motorRemainingSteps[motorIndex] = savedStepCount[motorIndex];
       }
-      else{
-          stepBackward(steps);
-          while( areMotorsRunning() ){
-            delay(1);
-          }
-      }
+      motorIdMaskForBlComp >>= 1;
+      motorIndex++;
+    }
+
+  }  // if ( motorIdMaskForBlComp != 0x00 )
+
+}
+
+// ----------------------------------------------------------------------------
+
+uint8_t SparkiClass::motorSpeedPercentToIntEvents (
+  uint8_t speedPercent
+) {
+
+  uint8_t  slowdownPercent;
+  uint32_t updatePeriodExtraUs;
+  uint32_t updatePeriodTotalUs;
+  uint16_t updatePeriodIntEvents;
+  uint8_t  updateIntervalIntEvents;
+
+
+  if ( speedPercent > 100 ) speedPercent = 100;
+  slowdownPercent = 100 - speedPercent;
+  updatePeriodExtraUs = (uint32_t) slowdownPercent * (
+                          SPARKI_MOTOR_UPDATE_PERIOD_MAX_US -
+                          SPARKI_MOTOR_UPDATE_PERIOD_MIN_US
+                        ) / 100;
+  updatePeriodTotalUs = SPARKI_MOTOR_UPDATE_PERIOD_MIN_US + updatePeriodExtraUs;
+  updatePeriodIntEvents = ( ( updatePeriodTotalUs << 1 ) / SPARKI_INTERRUPT_PERIOD_US + 1 ) >> 1;
+  updateIntervalIntEvents = updatePeriodIntEvents == 0 ? 0 : updatePeriodIntEvents - 1;
+
+  return updateIntervalIntEvents;
+
+  // NOTE: Bit shifts and +1 in updatePeriodIntEvents expression are to
+  // achieve rounding to the nearest half.
+
+  // FIXME (?): Not sure how smart the compiler is... If all the explicit
+  // intermediate variables result in lots of unique register allocations
+  // then consider trading off human readability for code efficiency and
+  // potentially mash everything into one giant expression.
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+uint8_t SparkiClass::motorIntEventsToSpeedPercent (
+  uint16_t updateIntervalIntEvents
+) {
+
+  uint16_t updatePeriodIntEvents;
+  uint32_t updatePeriodUs;
+  uint32_t updatePeriodExtraUs;
+  uint32_t updatePeriodExtraUsFp;
+  uint16_t slowdownPercentFp;
+  uint8_t  speedPercent;
+
+  updatePeriodIntEvents = updateIntervalIntEvents + 1;
+  updatePeriodUs = updatePeriodIntEvents * SPARKI_INTERRUPT_PERIOD_US;
+  updatePeriodExtraUs = updatePeriodUs - SPARKI_MOTOR_UPDATE_PERIOD_MIN_US;
+  updatePeriodExtraUsFp = updatePeriodExtraUs << 7;
+  slowdownPercentFp = updatePeriodExtraUsFp * 100 / (
+                        SPARKI_MOTOR_UPDATE_PERIOD_MAX_US -
+                        SPARKI_MOTOR_UPDATE_PERIOD_MIN_US
+                      );
+  speedPercent = 100 - ( slowdownPercentFp >> 7 );
+
+  return speedPercent;
+
+  // FIXME (?): Not sure how smart the compiler is... If all the explicit
+  // intermediate variables result in lots of unique register allocations
+  // then consider trading off human readability for code efficiency and
+  // potentially mash everything into one giant expression.
+
+}
+
+// ----------------------------------------------------------------------------
+// Motor Control: Primary Control Functions
+// ----------------------------------------------------------------------------
+
+uint32_t SparkiClass::driveDistanceToMotorSteps (
+  uint16_t distanceToDriveMm
+) {
+
+  uint32_t distanceToDriveSteps;
+
+  if ( distanceToDriveMm == 0 && distanceOfZeroMeansInfinity ) {
+    distanceToDriveSteps = 0;
+    distanceToDriveSteps = ~ distanceToDriveSteps;
   }
+  else {
+
+    distanceToDriveSteps = (
+        (uint32_t) distanceToDriveMm * 
+    //  SPARKI_MOTOR_DRIVE_MM_TO_STEPS_FP
+        driveMmToStepsEffFp
+      ) >> SPARKI_MOTOR_DRIVE_MM_TO_STEPS_FP_FRACT_BITS;
+  // steps = mm * rev/mm * steps/rev
+  //       = mm * rev/mm / rev/steps
+  //       = mm * SPARKI_MOTOR_DRIVE_MM_TO_STEPS
+
+  }
+
+  return distanceToDriveSteps;
+
 }
 
-void SparkiClass::stepBackward(unsigned long steps)
-{
-  motorRotate(MOTOR_LEFT,   DIR_CW, move_speed, steps);
-  motorRotate(MOTOR_RIGHT, DIR_CCW, move_speed, steps);
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+uint32_t SparkiClass::spinAngleToMotorSteps (
+  uint16_t angleToSpinDeg
+) {
+
+  uint32_t distanceToSpinSteps;
+
+  if ( angleToSpinDeg == 0 && distanceOfZeroMeansInfinity ) {
+    distanceToSpinSteps = 0;
+    distanceToSpinSteps = ~ distanceToSpinSteps;
+  }
+  else {
+
+    distanceToSpinSteps = (
+        (uint32_t) angleToSpinDeg *
+    //  SPARKI_MOTOR_SPIN_DEG_TO_STEPS_FP
+        spinDegToStepsEffFp 
+      ) >> SPARKI_MOTOR_SPIN_DEG_TO_STEPS_FP_FRACT_BITS;
+    // steps = deg * spin/deg * mm/spin * rev/mm * steps/rev
+    //       = deg / deg/spin * mm/spin / mm/rev * steps/rev
+    //       = ( deg * mm/spin * steps/rev ) / ( deg/spin * mm/rev )
+    //       = deg * SPARKI_MOTOR_SPIN_DEG_TO_STEPS
+
+  }
+
+  return distanceToSpinSteps;
+
 }
 
-void SparkiClass::moveBackward()
-{
-  motorRotate(MOTOR_LEFT,   DIR_CW, move_speed, ULONG_MAX);
-  motorRotate(MOTOR_RIGHT, DIR_CCW, move_speed, ULONG_MAX);
+// ----------------------------------------------------------------------------
+
+void SparkiClass::setupMotorForSteps (
+  byte     motorIdMask,
+  uint32_t stepCount,
+  boolean  stepClockwise,
+  uint8_t  speedPercent,
+  boolean  stopIfRunning
+) {
+
+  // NOTE: Typically, the caller of this function should disable
+  // interrupts before calling this function and enable interrupts
+  // again after this function's completion.
+
+  uint8_t motorIndex;
+  boolean motorIsRunningNow;
+  boolean priorDirWasCw;
+  boolean blCompWasPending;
+  boolean directionIsChanging;
+  boolean applyBacklashComp;
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  motorIndex = 0;
+  while ( motorIdMask != 0x00 ) {
+
+    if ( motorIdMask & 0x01 ) {
+
+      motorIsRunningNow = motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING;
+      if ( motorIsRunningNow && stopIfRunning ) {
+        modifyMotorStatusWordBit ( motorIndex, SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING, false, true );
+        motorIsRunningNow = false;
+      }
+
+      if ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_ON ) {
+        priorDirWasCw = motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_DIR_IS_CW;
+        blCompWasPending = motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_PEND;
+        directionIsChanging =   priorDirWasCw && ! stepClockwise ||
+                              ! priorDirWasCw &&   stepClockwise;
+        applyBacklashComp = ! blCompWasPending &&   directionIsChanging ||
+                              blCompWasPending && ! directionIsChanging;
+      } else {
+        applyBacklashComp = false;
+      }
+
+      modifyMotorStatusWordBit ( motorIndex, SPARKI_MOTOR_STATUS_MASK_DIR_IS_CW, stepClockwise, true );
+
+      motorUpdateIntervalIntEvents[motorIndex] = motorSpeedPercentToIntEvents ( speedPercent );
+
+      if ( ! motorIsRunningNow ||
+           motorTimeToUpdateIntEvents[motorIndex] > motorUpdateIntervalIntEvents[motorIndex] ) {
+        motorTimeToUpdateIntEvents[motorIndex] = motorUpdateIntervalIntEvents[motorIndex];
+      }
+
+      motorRemainingSteps[motorIndex] = stepCount;
+
+      if ( motorIsRunningNow ) {
+        if ( applyBacklashComp ) motorRemainingSteps[motorIndex] += SPARKI_MOTOR_STEPS_OF_BACKLASH;
+      } else {
+        modifyMotorStatusWordBit ( motorIndex, SPARKI_MOTOR_STATUS_MASK_BLCOMP_IS_PEND, applyBacklashComp, true );
+      }
+
+      // NOTE/FIXME: Applying backlash compensation to the wheels while
+      // they are running may not yield nice results with the current
+      // implementation. Improve this?
+
+    }  // if ( motorIdMask & 0x01 )
+
+    motorIdMask >>= 1;
+    motorIndex++;
+
+  }  // while ( motorIdMask != 0x00 )
+
 }
 
-void SparkiClass::moveStop()
-{
-  motorStop(MOTOR_LEFT);
-  motorStop(MOTOR_RIGHT);
+// ----------------------------------------------------------------------------
+
+void SparkiClass::startMotorRotation (
+  byte    motorIdMask,
+  boolean waitUntilDone
+) {
+
+  byte    motorIdMaskSaved;
+  uint8_t motorIndex;
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  performMotorBacklashCompensation ( motorIdMask );
+
+//cli ();
+//modifyMotorStatusWordBit ( motorIdMask, SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING, true );
+//sei ();
+
+  motorIdMaskSaved = motorIdMask;
+  motorIndex = 0;
+  cli ();
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+      if ( motorRemainingSteps[motorIndex] > 0 ) {
+        modifyMotorStatusWordBit ( motorIndex, SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING, true, true );
+      }
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
+  }
+  sei ();
+  motorIdMask = motorIdMaskSaved;
+
+  if ( waitUntilDone ) while ( anyMotorIsRunning(motorIdMask) ) delay ( 10 );
+
 }
 
-void SparkiClass::gripperOpen()
-{
-  motorRotate(MOTOR_GRIPPER, DIR_CCW, move_speed, ULONG_MAX);
-}
-void SparkiClass::gripperClose()
-{
-  motorRotate(MOTOR_GRIPPER, DIR_CW, move_speed, ULONG_MAX);
-}
-void SparkiClass::gripperStop()
-{
-  motorStop(MOTOR_GRIPPER);
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::stopMotorRotation (
+  byte motorIdMask
+) {
+
+  modifyMotorStatusWordBit ( motorIdMask, SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING, false );
+
 }
 
-void SparkiClass::speed(uint8_t speed)
-{
-    move_speed = speed;
+// ----------------------------------------------------------------------------
+
+void SparkiClass::rotateMotorsBySteps (
+  byte     motorIdMask,
+  uint32_t stepCount,
+  int8_t   turnDirection,
+  boolean  waitUntilDone,
+  uint8_t  speedPercent
+) {
+
+  cli ();
+  setupMotorForSteps ( motorIdMask, stepCount, turnDirection, speedPercent, true );
+  sei ();
+
+  startMotorRotation ( motorIdMask, waitUntilDone );
+
 }
 
+// ----------------------------------------------------------------------------
 
-void SparkiClass::motorRotate(int motor, int direction, int speed, long steps)
-{
-   Serial.print("Motor ");Serial.print(motor); Serial.print(" rotate, dir= "); 
-   Serial.print(direction); Serial.print(", steps= "); Serial.println(steps);
-   
-   motor_speed[motor] = speed; // speed in 1-100 precent
-   
-   // populate the speed array with multiples of 200us waits between steps
-   // having 10 different waits allows finer grained control
-   if(speed == 0){
-      uint8_t oldSREG = SREG; cli();
-      remainingSteps[motor] = 0; 
-      isRunning[motor] = false;
-      SREG = oldSREG; sei(); 
-   }
-   else{
-      int base_waits = 500/speed;
-      int remainder_waits = int((500.0/float(speed) - float(base_waits))*SPEED_ARRAY_LENGTH); 
+uint8_t SparkiClass::countOfMotorsRunning (
+  byte motorIdMask
+) {
 
-      for(uint8_t i=0; i< (SPEED_ARRAY_LENGTH-remainder_waits); i++){
-         speed_array[motor][i] = base_waits+1;
-       }
-      for(uint8_t i=(SPEED_ARRAY_LENGTH-remainder_waits); i<SPEED_ARRAY_LENGTH; i++){
-         speed_array[motor][i] = base_waits;
-       }
-      
-      uint8_t oldSREG = SREG; cli();
-      speed_index[motor] = 0;
-      speedCount[motor] = speed_array[motor][0];
-      speedCounter[motor] = speedCount[motor];
-      remainingSteps[motor] = steps;
-      step_dir[motor] = direction;  
-      isRunning[motor] = true;
-      SREG = oldSREG; sei(); 
+  boolean motorCount;
+  uint8_t motorIndex;
 
-      Serial.print("base: ");
-      Serial.print(base_waits);
-      Serial.print(", remainder: ");
-      Serial.println(remainder_waits);
-   }
-   delay(1);
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  motorCount = 0;
+  motorIndex = 0;
+  cli ();
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+      if ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING ) motorCount++;
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
+  }
+  sei ();
+  
+  return motorCount;
+
 }
 
-void SparkiClass::motorStop(int motor)
-{
-   motorRotate(motor, 1, 0, 0);
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::anyMotorIsRunning (
+  byte motorIdMask
+) {
+
+  boolean motorRunning;
+  uint8_t motorIndex;
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  motorRunning = false;
+  motorIndex = 0;
+  cli ();
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+      motorRunning = motorRunning || ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING );
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
+  }
+  sei ();
+  
+  return motorRunning;
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::allMotorsAreRunning (
+  byte motorIdMask
+) {
+
+  boolean motorRunning;
+  uint8_t motorIndex;
+
+  motorIdMask &= SPARKI_MOTOR_ID_MASK_ALL;
+
+  motorRunning = true;
+  motorIndex = 0;
+  cli ();
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+      motorRunning = motorRunning && ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING );
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
+  }
+  sei ();
+  
+  return motorRunning;
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::drive (
+  int16_t  distanceToDriveMm,
+  boolean  directionIsFoward,
+  boolean  waitUntilDone,
+  int8_t   speedPercent
+) {
+
+  uint32_t distanceToDriveSteps;
+
+  if ( distanceToDriveMm < 0 ) {
+    directionIsFoward = ! directionIsFoward;
+    distanceToDriveMm = - distanceToDriveMm;
+  }
+
+  if ( speedPercent < 0 ) speedPercent = wheelSpeedPercentDefault;
+
+  waitUntilDone = waitUntilDone && distanceToDriveMm > 0;
+
+  distanceToDriveSteps = driveDistanceToMotorSteps ( distanceToDriveMm );
+
+  if ( distanceToDriveSteps > 0 ) {
+
+    cli ();
+
+    setupMotorForSteps (
+      SPARKI_MOTOR_ID_MASK_WHEEL_LEFT,
+      distanceToDriveSteps,
+      directionIsFoward ? SPARKI_MOTOR_DIR_COUNTERCLOCKWISE : SPARKI_MOTOR_DIR_CLOCKWISE,
+      speedPercent,
+      true
+    );
+
+    setupMotorForSteps (
+      SPARKI_MOTOR_ID_MASK_WHEEL_RIGHT,
+      distanceToDriveSteps,
+      directionIsFoward ? SPARKI_MOTOR_DIR_CLOCKWISE : SPARKI_MOTOR_DIR_COUNTERCLOCKWISE,
+      speedPercent,
+      true
+    );
+
+    sei ();
+
+    startMotorRotation ( SPARKI_MOTOR_ID_MASK_WHEELS, waitUntilDone );
+
+  }  // if ( distanceToDriveSteps > 0 )
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::driveForward (
+  int16_t  distanceToDriveMm,
+  boolean  waitUntilDone,
+  int8_t   speedPercent
+) {
+
+  drive ( distanceToDriveMm, true, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::driveBackward (
+  int16_t  distanceToDriveMm,
+  boolean  waitUntilDone,
+  int8_t   speedPercent
+) {
+
+  drive ( distanceToDriveMm, false, waitUntilDone, speedPercent );
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::spin (
+  int16_t angleToSpinDeg,
+  boolean directionIsRight,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  uint32_t distanceToSpinSteps;
+
+  if ( angleToSpinDeg < 0 ) {
+    directionIsRight = ! directionIsRight;
+    angleToSpinDeg = - angleToSpinDeg;
+  }
+
+  if ( speedPercent < 0 ) speedPercent = wheelSpeedPercentDefault;
+
+  waitUntilDone = waitUntilDone && angleToSpinDeg > 0;
+
+  distanceToSpinSteps = spinAngleToMotorSteps ( angleToSpinDeg );
+
+  if ( distanceToSpinSteps > 0 ) {
+
+    cli ();
+
+    setupMotorForSteps (
+      SPARKI_MOTOR_ID_MASK_WHEEL_LEFT,
+      distanceToSpinSteps,
+      directionIsRight ? SPARKI_MOTOR_DIR_COUNTERCLOCKWISE : SPARKI_MOTOR_DIR_CLOCKWISE,
+      speedPercent,
+      true
+    );
+
+    setupMotorForSteps (
+      SPARKI_MOTOR_ID_MASK_WHEEL_RIGHT,
+      distanceToSpinSteps,
+      directionIsRight ? SPARKI_MOTOR_DIR_COUNTERCLOCKWISE : SPARKI_MOTOR_DIR_CLOCKWISE,
+      speedPercent,
+      true
+    );
+
+    sei ();
+
+    startMotorRotation ( SPARKI_MOTOR_ID_MASK_WHEELS, waitUntilDone );
+
+  }  // if ( distanceToSpinSteps > 0 )
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::spinLeft (
+  int16_t angleToSpinDeg,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  spin ( angleToSpinDeg, SPARKI_MOTOR_DIR_COUNTERCLOCKWISE, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::spinRight (
+  int16_t angleToSpinDeg,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  spin ( angleToSpinDeg, SPARKI_MOTOR_DIR_CLOCKWISE, waitUntilDone, speedPercent );
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::turn (
+  int16_t angleToTurnDeg,
+  boolean directionIsRight,
+  int16_t radiusOfTurnMm,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  const uint8_t updatePeriodFractBits = 2;
+
+  int8_t   negRadSpinAngleDeg;
+  int8_t   halfWheelSeparationMm;
+  int16_t  outerWheelTurnRadiusMm;
+  int16_t  innerWheelTurnRadiusMm;
+  int32_t  turnRadiusMmToStepsEffFp;
+  int32_t  innerWheelDriveDistanceSteps;
+  int32_t  outerWheelDriveDistanceSteps;
+  int32_t  centerMoveDistanceSteps;
+  boolean  outerWheelDirIsForward;
+  boolean  innerWheelDirIsForward;
+  uint16_t minUpdatePeriodIntEvents;
+  uint16_t centerUpdatePeriodIntEv;
+  uint16_t outerWheelUpdatePeriodIntEv;
+  uint16_t innerWheelUpdatePeriodIntEv;
+  byte     outerWheelIdMask;
+  uint8_t  outerWheelIndex;
+  byte     innerWheelIdMask;
+  uint8_t  innerWheelIndex;
+  boolean  outerWheelDirIsClockwise;
+  boolean  innerWheelDirIsClockwise;
+
+  // Handle corner cases...
+
+  if ( speedPercent < 0 ) speedPercent = wheelSpeedPercentDefault;
+
+  if ( radiusOfTurnMm == 0 ) {
+    if ( angleToTurnDeg != 0 ) spin ( angleToTurnDeg, true, waitUntilDone, speedPercent );
+    return;
+  }
+
+  // Set up special handling of negative turn radius...
+
+  if ( ! SPARKI_WHEEL_TURN_WITH_NEG_RAD_ALTERNATE || radiusOfTurnMm >= 0 ) {
+    negRadSpinAngleDeg = 0;
+  }
+  else {
+    if ( directionIsRight && angleToTurnDeg < 0 || ! directionIsRight && angleToTurnDeg > 0 ) {
+      negRadSpinAngleDeg = -90;
+    }
+    else {
+      negRadSpinAngleDeg = +90;
+    }
+    radiusOfTurnMm   = - radiusOfTurnMm;
+    directionIsRight = ! directionIsRight;  
+    waitUntilDone    = true;
+  }
+
+  if ( negRadSpinAngleDeg != 0 ) spin ( + negRadSpinAngleDeg );
+
+  // Calculate turn radii for individual wheels...
+
+  halfWheelSeparationMm = wheelSeparationUmEff / 20;
+
+  outerWheelTurnRadiusMm = radiusOfTurnMm + halfWheelSeparationMm;
+  innerWheelTurnRadiusMm = radiusOfTurnMm - halfWheelSeparationMm;
+
+  // Calculate driving distance for center point (pen hole)
+  // and for each wheel...
+
+  turnRadiusMmToStepsEffFp = (int32_t) angleToTurnDeg * turnRadMmAngleDegToStepsEffFp;
+
+  centerMoveDistanceSteps = (
+    (int32_t) radiusOfTurnMm * turnRadiusMmToStepsEffFp
+  ) >> SPARKI_TURN_RADIUSMM_ANGLEDEG_TO_STEPS_FP_FRACT_BITS;
+
+  outerWheelDriveDistanceSteps = (
+    (int32_t) outerWheelTurnRadiusMm * turnRadiusMmToStepsEffFp
+  ) >> SPARKI_TURN_RADIUSMM_ANGLEDEG_TO_STEPS_FP_FRACT_BITS;
+
+  innerWheelDriveDistanceSteps = (
+    (int32_t) innerWheelTurnRadiusMm * turnRadiusMmToStepsEffFp
+  ) >> SPARKI_TURN_RADIUSMM_ANGLEDEG_TO_STEPS_FP_FRACT_BITS;
+
+  // Normalize driving distances to positive quantities...
+
+  centerMoveDistanceSteps = centerMoveDistanceSteps < 0 ? - centerMoveDistanceSteps : centerMoveDistanceSteps;
+
+  if ( outerWheelDriveDistanceSteps >= 0 ) {
+    outerWheelDirIsForward = true;
+  }
+  else {
+    outerWheelDirIsForward = false;
+    outerWheelDriveDistanceSteps = - outerWheelDriveDistanceSteps;
+  }
+
+  if ( innerWheelDriveDistanceSteps >= 0 ) {
+    innerWheelDirIsForward = true;
+  }
+  else {
+    innerWheelDirIsForward = false;
+    innerWheelDriveDistanceSteps = - innerWheelDriveDistanceSteps;
+  }
+
+  // Compute speed setting for each wheel...
+
+  minUpdatePeriodIntEvents = ( motorSpeedPercentToIntEvents (          100 ) + 1 ) << updatePeriodFractBits;
+  centerUpdatePeriodIntEv  = ( motorSpeedPercentToIntEvents ( speedPercent ) + 1 ) << updatePeriodFractBits;
+
+  outerWheelUpdatePeriodIntEv = centerMoveDistanceSteps * centerUpdatePeriodIntEv / outerWheelDriveDistanceSteps;
+  innerWheelUpdatePeriodIntEv = centerMoveDistanceSteps * centerUpdatePeriodIntEv / innerWheelDriveDistanceSteps;
+
+  if ( outerWheelUpdatePeriodIntEv < minUpdatePeriodIntEvents || innerWheelUpdatePeriodIntEv < minUpdatePeriodIntEvents ) {
+    if ( outerWheelUpdatePeriodIntEv <= innerWheelUpdatePeriodIntEv ) {
+      innerWheelUpdatePeriodIntEv = innerWheelUpdatePeriodIntEv * minUpdatePeriodIntEvents / outerWheelUpdatePeriodIntEv;
+      outerWheelUpdatePeriodIntEv = minUpdatePeriodIntEvents;
+    }
+    else {
+      outerWheelUpdatePeriodIntEv = outerWheelUpdatePeriodIntEv * minUpdatePeriodIntEvents / innerWheelUpdatePeriodIntEv;
+      innerWheelUpdatePeriodIntEv = minUpdatePeriodIntEvents;
+    }
+  }
+
+  outerWheelUpdatePeriodIntEv = ( outerWheelUpdatePeriodIntEv + ( 1 << updatePeriodFractBits-1 ) ) >> updatePeriodFractBits;
+  innerWheelUpdatePeriodIntEv = ( innerWheelUpdatePeriodIntEv + ( 1 << updatePeriodFractBits-1 ) ) >> updatePeriodFractBits;
+
+  // Drive the turn...
+
+  if ( directionIsRight ) {
+    outerWheelIdMask = SPARKI_MOTOR_ID_MASK_WHEEL_LEFT;
+    outerWheelIndex  = SPARKI_MOTOR_INDEX_WHEEL_LEFT;
+    outerWheelDirIsClockwise = ! outerWheelDirIsForward;
+    innerWheelIdMask = SPARKI_MOTOR_ID_MASK_WHEEL_RIGHT;
+    innerWheelIndex  = SPARKI_MOTOR_INDEX_WHEEL_RIGHT;
+    innerWheelDirIsClockwise =   innerWheelDirIsForward;
+  }
+  else {
+    outerWheelIdMask = SPARKI_MOTOR_ID_MASK_WHEEL_RIGHT;
+    outerWheelIndex  = SPARKI_MOTOR_INDEX_WHEEL_RIGHT;
+    outerWheelDirIsClockwise =   outerWheelDirIsForward;
+    innerWheelIdMask = SPARKI_MOTOR_ID_MASK_WHEEL_LEFT;
+    innerWheelIndex  = SPARKI_MOTOR_INDEX_WHEEL_LEFT;
+    innerWheelDirIsClockwise = ! innerWheelDirIsForward;
+  }
+
+  cli ();
+
+  setupMotorForSteps (
+    outerWheelIdMask,
+    outerWheelDriveDistanceSteps,
+    outerWheelDirIsClockwise ? SPARKI_MOTOR_DIR_CLOCKWISE : SPARKI_MOTOR_DIR_COUNTERCLOCKWISE,
+    0,  // speed percent is don't-care; interrupt interval is set directly below
+    true
+  );
+  motorUpdateIntervalIntEvents[outerWheelIndex] = outerWheelUpdatePeriodIntEv - 1;
+  motorTimeToUpdateIntEvents[outerWheelIndex]   = outerWheelUpdatePeriodIntEv - 1;
+
+  setupMotorForSteps (
+    innerWheelIdMask,
+    innerWheelDriveDistanceSteps,
+    innerWheelDirIsClockwise ? SPARKI_MOTOR_DIR_CLOCKWISE : SPARKI_MOTOR_DIR_COUNTERCLOCKWISE,
+    0,  // speed percent is don't-care; interrupt interval is set directly below
+    true
+  );
+  motorUpdateIntervalIntEvents[innerWheelIndex] = innerWheelUpdatePeriodIntEv - 1;
+  motorTimeToUpdateIntEvents[innerWheelIndex]   = innerWheelUpdatePeriodIntEv - 1;
+
+  sei ();
+
+  startMotorRotation ( SPARKI_MOTOR_ID_MASK_WHEELS, waitUntilDone );
+
+  // Finish special handling of negative turn radius...
+  
+  if ( negRadSpinAngleDeg != 0 ) spin ( - negRadSpinAngleDeg );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::turnLeft (
+  int16_t angleToTurnDeg,
+  int16_t radiusOfTurnMm,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  turn ( angleToTurnDeg, false, radiusOfTurnMm, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::turnRight (
+  int16_t angleToTurnDeg,
+  int16_t radiusOfTurnMm,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  turn ( angleToTurnDeg, true, radiusOfTurnMm, waitUntilDone, speedPercent );
+
+}
+
+// ----------------------------------------------------------------------------
+
+boolean SparkiClass::wheelsAreRunning () {
+
+  return anyMotorIsRunning ( SPARKI_MOTOR_ID_MASK_WHEELS );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::stopWheels () {
+
+  stopMotorRotation ( SPARKI_MOTOR_ID_MASK_WHEELS );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::wheelsAreDone () {
+
+  byte    motorIdMask;
+  uint8_t motorIndex;
+  boolean wheelsDone;
+
+  motorIdMask = SPARKI_MOTOR_ID_MASK_WHEELS;
+
+  wheelsDone = true;
+
+  motorIndex = 0;
+  while ( motorIdMask != 0x00 ) {
+    if ( motorIdMask & 0x01 ) {
+      wheelsDone = wheelsDone && 
+        ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING ) &&
+        motorRemainingSteps[motorIndex] == 0;
+    }
+    motorIdMask >>= 1;
+    motorIndex++;
+  }
+
+  return wheelsDone;
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::restartWheels (
+  boolean waitUntilDone
+) {
+
+  startMotorRotation ( SPARKI_MOTOR_ID_MASK_WHEELS, waitUntilDone );
+
+}
+
+// ----------------------------------------------------------------------------
+
+void SparkiClass::openGripper (
+  int8_t  amountToOpenMm,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  uint8_t  absAmountToOpenMm;
+  uint32_t stepsToMove;
+
+  if ( gripperIsRunning() ) stopGripper ();
+
+  if ( speedPercent < 0 ) speedPercent = gripperSpeedPercentDefault;
+
+  if ( amountToOpenMm != 0 ) {
+
+    if ( amountToOpenMm >= 0 ) {
+      absAmountToOpenMm = amountToOpenMm;
+      if ( absAmountToOpenMm >= SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM ) {
+        amountToOpenMm    =   SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM;
+        absAmountToOpenMm =   SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM;
+        gripperSpacingMm  =   0;
+      }
+    }
+    else {
+      absAmountToOpenMm = - amountToOpenMm;
+      if ( absAmountToOpenMm >= SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM ) {
+        amountToOpenMm    = - SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM;
+        absAmountToOpenMm =   SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM;
+        gripperSpacingMm  =   SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM;
+      }
+    }
+
+    if ( gripperSpacingMm >= 0 ) {
+      gripperSpacingMm += amountToOpenMm;
+      if ( gripperSpacingMm < 0 ) {
+        gripperSpacingMm = 0;
+      }
+      if ( gripperSpacingMm > SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM ) {
+        gripperSpacingMm = SPARKI_MOTOR_GRIPPER_OPEN_MAX_MM;
+      }
+    }
+
+    stepsToMove = (
+        (uint32_t) absAmountToOpenMm *
+        SPARKI_MOTOR_GRIP_MM_TO_STEPS_FP
+      ) >> SPARKI_MOTOR_GRIP_MM_TO_STEPS_FP_FRACT_BITS;
+    // steps = mm * teeth/mm * rev/teeth * steps/rev / 2
+    //       = mm / mm/teeth / teeth/rev * steps/rev / 2
+    //       = ( mm * steps/rev ) / ( mm/teeth * teeth/rev * 2 )
+    //       = mm * SPARKI_MOTOR_GRIP_MM_TO_STEPS
+
+    cli ();
+
+    setupMotorForSteps (
+      SPARKI_MOTOR_ID_MASK_GRIPPER,
+      stepsToMove,
+      amountToOpenMm > 0 ? SPARKI_MOTOR_DIR_COUNTERCLOCKWISE : SPARKI_MOTOR_DIR_CLOCKWISE,
+      speedPercent,
+      true
+    );
+
+    sei ();
+
+    startMotorRotation ( SPARKI_MOTOR_ID_MASK_GRIPPER, waitUntilDone );
+
+  }
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::closeGripper (
+  int8_t  amountToCloseMm,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  openGripper ( -amountToCloseMm, waitUntilDone, speedPercent );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::setGripperSpacing (
+  uint8_t spacingMm,
+  boolean waitUntilDone,
+  int8_t  speedPercent
+) {
+
+  int8_t amountToOpenMm;
+
+  if ( gripperSpacingMm >= 0 ) {
+    amountToOpenMm = (int8_t) spacingMm - gripperSpacingMm;
+    openGripper ( amountToOpenMm, waitUntilDone, speedPercent );
+  }
+
+}
+
+// ----------------------------------------------------------------------------
+
+boolean SparkiClass::gripperIsRunning () {
+
+  return anyMotorIsRunning ( SPARKI_MOTOR_ID_MASK_GRIPPER );
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::stopGripper () {
+
+  uint8_t  distanceNotTraveledMm;
+
+  if ( gripperIsRunning() ) {
+
+    stopMotorRotation ( SPARKI_MOTOR_ID_MASK_GRIPPER );
+
+    if ( gripperSpacingMm >= 0 ) {
+
+      distanceNotTraveledMm = ( 
+          motorRemainingSteps[SPARKI_MOTOR_INDEX_GRIPPER] *
+          SPARKI_MOTOR_GRIP_STEPS_TO_MM_FP
+        ) >> SPARKI_MOTOR_GRIP_STEPS_TO_MM_FP_FRACT_BITS;
+      // mm = steps * rev/steps * teeth/rev * mm/teeth * 2
+      //    = steps / steps/rev * teeth/rev * mm/teeth * 2
+      //    = ( steps * teeth/rev * mm/teeth * 2 ) / steps/rev
+      //    = steps * SPARKI_MOTOR_GRIP_STEPS_TO_MM
+
+      if ( motorStatusWord[SPARKI_MOTOR_INDEX_GRIPPER] & SPARKI_MOTOR_STATUS_MASK_DIR_IS_CW ) {
+        gripperSpacingMm += distanceNotTraveledMm;
+      }
+      else {
+        gripperSpacingMm -= distanceNotTraveledMm;
+      }
+
+    }  // if ( gripperSpacingMm >= 0 )
+
+  }  // if ( gripperIsRunning() )
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+boolean SparkiClass::gripperIsDone () {
+
+  return motorRemainingSteps[SPARKI_MOTOR_INDEX_GRIPPER] == 0;
+
+}
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+void SparkiClass::restartGripper (
+  boolean waitUntilDone
+) {
+
+  startMotorRotation ( SPARKI_MOTOR_ID_MASK_GRIPPER, waitUntilDone );
+
+}
+
+// ----------------------------------------------------------------------------
+// Motor Control: Legacy Functions / Backward Compatibility
+// ----------------------------------------------------------------------------
+
+void SparkiClass::moveLeft ( float deg ) {
+  boolean savedZeroMeansInfinity;
+  savedZeroMeansInfinity = distanceOfZeroMeansInfinity;
+  distanceOfZeroMeansInfinity = true;
+  spinLeft ( (int16_t) deg );
+  distanceOfZeroMeansInfinity = savedZeroMeansInfinity;
+}
+void SparkiClass::moveLeft () {
+  spinLeft ();
+}
+
+void SparkiClass::moveRight ( float deg ) {
+  boolean savedZeroMeansInfinity;
+  savedZeroMeansInfinity = distanceOfZeroMeansInfinity;
+  distanceOfZeroMeansInfinity = true;
+  spinRight ( (int16_t) deg );
+  distanceOfZeroMeansInfinity = savedZeroMeansInfinity;
+}
+void SparkiClass::moveRight () {
+  spinRight ();
+}
+
+void SparkiClass::moveForward ( float cm ) {
+  boolean savedZeroMeansInfinity;
+  savedZeroMeansInfinity = distanceOfZeroMeansInfinity;
+  distanceOfZeroMeansInfinity = true;
+  driveForward ( (int16_t) ( cm * 10 ) );
+  distanceOfZeroMeansInfinity = savedZeroMeansInfinity;
+}
+void SparkiClass::moveForward () {
+  driveForward ();
+}
+
+void SparkiClass::moveBackward ( float cm ) {
+  boolean savedZeroMeansInfinity;
+  savedZeroMeansInfinity = distanceOfZeroMeansInfinity;
+  distanceOfZeroMeansInfinity = true;
+  driveBackward ( (int16_t) ( cm * 10 ) );
+  distanceOfZeroMeansInfinity = savedZeroMeansInfinity;
+}
+void SparkiClass::moveBackward () {
+  driveBackward ();
+}
+
+void SparkiClass::moveStop () {
+  stopWheels ();
+}
+
+void SparkiClass::gripperOpen () {
+  openGripper ();
+}
+void SparkiClass::gripperClose () {
+  closeGripper ();
+}
+
+void SparkiClass::gripperStop () {
+  stopGripper ();
+}
+
+void SparkiClass::motorRotate ( int motor, int direction, int speed ) {
+  rotateMotorsBySteps ( 0x01 < motor, ULONG_MAX, direction == DIR_CW, speed, false );
+  delay ( 10 );
+}
+
+void SparkiClass::motorStop ( int motor ) {
+  stopMotorRotation ( 0x01 < motor );
+}
+
+void SparkiClass::motorsRotateSteps ( int leftDir, int rightDir, int speed, uint32_t steps, bool wait ) {
+  cli ();
+  setupMotorForSteps ( SPARKI_MOTOR_ID_MASK_WHEEL_LEFT,  steps, leftDir  == DIR_CW, speed, true );
+  setupMotorForSteps ( SPARKI_MOTOR_ID_MASK_WHEEL_RIGHT, steps, rightDir == DIR_CW, speed, true );
+  sei ();
+  startMotorRotation ( SPARKI_MOTOR_ID_MASK_WHEELS, wait ); 
 }
  
- // returns true if one or both motors a still stepping
- bool SparkiClass::areMotorsRunning()
- {
-   bool result;
-   uint8_t oldSREG = SREG;
-   cli();
-   result =  isRunning[MOTOR_LEFT] || isRunning[MOTOR_RIGHT] || isRunning[MOTOR_GRIPPER] ;
-   SREG = oldSREG; 
-   sei();
-   return result;
- }
+bool SparkiClass::areMotorsRunning ( ) {
+  return anyMotorIsRunning ( SPARKI_MOTOR_ID_MASK_ALL );
+}
+
+// ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 
 int SparkiClass::ping_single(){
   long duration; 
@@ -610,106 +1794,6 @@ int SparkiClass::ping(){
   return int(distances[(int)ceil((float)attempts/2.0)]); 
 }
 
-// Uses timer3 to send on/off IR pulses according to the NEC IR transmission standard
-// http://wiki.altium.com/display/ADOH/NEC+Infrared+Transmission+Protocol
-// protocol. Turns off timer3 functions and timer4 motor/LED interference to avoid conflict
-void SparkiClass::sendIR(uint8_t code){
-  char oldSREG = SREG;				
-  noInterrupts();  // Disable interrupts for 16 bit register access
-  
-  //***********************************************
-  // Set up and tear down Timer3 and Timer4 roles
-  //***********************************************
-  
-  // saves settings for timer3
-  uint8_t TIMSK3_store = TIMSK3;
-  uint8_t TCCR3A_store = TCCR3A;
-  uint8_t TCCR3B_store = TCCR3B;
-  uint8_t TCNT3_store = TCNT3;  
-  uint8_t EIMSK_store = EIMSK;
-  
-  uint8_t TIMSK4_store = TIMSK4;
-  
-  // wipe the timer settings
-  TIMSK4 = 0;
-  TIMSK3 = 0;
-  TCCR3A = 0;
-  TCCR3B = 0;
-  TCNT3  = 0;
-  EIMSK  = 0;
-
-  TCCR3B |= _BV(CS31);      // set timer clock at 1/8th of CLK_i/o (=CLK_sys)
-  OCR3B = 22;               // compare match register
-  
-  TIMSK3 |= (1 << OCIE3B);  // enable Timer3 compare interrupt B
-
-  interrupts();  // re-enable interrupts
-  SREG = oldSREG;
-  
-  
-  //*****************************************
-  // send the pulses 
-  //*****************************************
-  
-  
-  // leadings 9ms pulse, 4.5ms gap
-  irPulse(9000,4500);
-  
-  // 8 bit address
-  for(int i=0; i<8; i++){
-      irPulse(563,563); // NEC logical 0
-  }
- 
-  // 8 bit address' logical inverse
-  for(int i=0; i<8; i++){
-      irPulse(563,1687); // NEC logical 1
-  }
-  
-  // 8 bit command
-  for(uint8_t i=0; i<8; i++){
-    if( (code & (1<<i)) > 0 ){
-        irPulse(563,1687); // NEC logical 1
-    }
-    else{
-        irPulse(563,563);  // NEC logical 0  
-    }
-  }
-
-  // 8 bit command's logical inverse
-  for(uint8_t i=0; i<8; i++){
-    if( (code & (1<<i)) > 0 ){
-        irPulse(563,563);  // NEC logical 0
-    }
-    else{
-        irPulse(563,1687); // NEC logical 1
-    }
-  }
-  
-  // 562.5µs pulse to signal end of transmission
-  irPulse(563,10); // NEC logical 1  
-
-  //*****************************************
-  // restore Timer3 and Timer4 roles
-  //*****************************************
-  
-  // restore the timer
-  TIMSK4 = TIMSK4_store;
-  TIMSK3 = TIMSK3_store;
-  TCCR3A = TCCR3A_store;
-  TCCR3B = TCCR3B_store;
-  TCNT3  = TCNT3_store;
-  EIMSK  = EIMSK_store;
-}
-
-void SparkiClass::irPulse(uint16_t on, uint16_t off){
-    TIMSK3 |= (1 << OCIE3B);  // enable  38khz signal
-    delayMicroseconds(on);
-    TIMSK3 &= ~(1 << OCIE3B);  // disable 38khz signal
-    PORTD &= ~(1<<7); // make sure the LED is off
-    delayMicroseconds(off);    
-}
-
-
 void SparkiClass::startServoTimer(){
   char oldSREG = SREG;				
   noInterrupts();                                       // Disable interrupts for 16 bit register access
@@ -734,7 +1818,7 @@ void SparkiClass::servo(int deg)
   unsigned long dutyCycle = 20000;
   dutyCycle *= duty;
   dutyCycle >>= 10;
-   
+  
   char oldSREG = SREG;
   noInterrupts();
   OCR1A = dutyCycle;
@@ -801,6 +1885,36 @@ SIGNAL(INT6_vect) {
       }    
       lastPulseTime = currentTime;
   }
+}
+
+// setups up timer to pulse 38khz on and off in a pre-described sequence according to NEC
+// protocol
+// http://wiki.altium.com/display/ADOH/NEC+Infrared+Transmission+Protocol
+
+void SparkiClass::sendIR(uint8_t code){
+    // setup PD7 (6) to 38khz on pin  using TIMER4 COMPD
+
+  
+  OCR4D = 13;               // compare match register 16MHz/32/38000Hz
+  TCCR4D |= (1 << WGM12);   // CTC mode
+  TCCR4D = 0x06;            // CLK/32 prescaler (32 = 2^(0110-1))
+  TIMSK4 |= (1 << OCIE4D);  // enable Timer4 compare interrupt D - need to switch to PWM
+  
+  
+    
+    // go through each bit in byte, pulse appropriate IR
+    //leading pulse Xms on, Yms off
+    
+    //leading pulse of all 0
+    for(uint8_t bit = 0; bit < 8; bit++){ // for each bit in the byte
+        if(code & (1<<bit) > 0){ // determine if bit is 1
+            // bit==1: pulse for Xms on, off for Yms
+        }
+        else{
+            // bit==0: pulse for Xms on, off for Yms
+        }
+    }
+    // re-establish output on Timer 4 for 10khz control loop
 }
 
 float SparkiClass::accelX(){
@@ -877,28 +1991,36 @@ uint8_t* SparkiClass::WireRead(int address, int length){
   Wire.endTransmission();
 }
 
- /*
-  * private functions
-  */
- 
- // set the number if steps for the given motor 
-
-ISR(TIMER3_COMPB_vect) // IR send function, operates at ~38khz when active
-{
-    PORTD ^= (1<<7); // toggle the IR LED pin
-    TCNT3=0;
-}
-
 /***********************************************************************************
 The Scheduler
 Every 200uS (5,000 times a second), we update the 2 shift registers used to increase
 the amount of outputs the processor has
 ***********************************************************************************/
-ISR(TIMER4_COMPA_vect)          // interrupt service routine that wraps a user defined function supplied by attachInterrupt
-{
-//void SparkiClass::scheduler(){ 
-    // Clear the timer interrupt counter
-    TCNT4=0;
+
+// ISR: interrupt service routine for timer interrupt. This interrupt
+// service routine then calls a Sparki library function that performs
+// whatever tasks are necessary. By calling the library function instead
+// of just placing the library function's code directly into the ISR, the
+// code can reference private members of the the Sparki class instance,
+// so that low-level, private state does not need to reside and be exposed
+// at global scope.
+
+ISR ( TIMER4_COMPA_vect ) { 
+  byte oldSREG = SREG;
+  TCNT4 = 0;  // clearing the timer interrupt counter 
+  sparki.updateShiftReg ();
+  SREG = oldSREG;
+}
+
+// updateShiftReg: function to update shift register that extends number of
+// processor outputs. This function is called automatically through timer
+// interrupts. Under normal circumstances, it should not be called by user
+// or library code. If it does need to be called; it should be bracketed by
+// cli() / sei().
+
+void SparkiClass::updateShiftReg () { 
+
+    byte shift_outputs[2];
 
 	// clear the shift register values so we can re-write them
     shift_outputs[0] = 0x00;
@@ -926,57 +2048,108 @@ ISR(TIMER4_COMPA_vect)          // interrupt service routine that wraps a user d
     else{
     	shift_outputs[1] |= 0x08;
     }
-    
-    //// Motor Control ////
-    //   Determine what state the stepper coils are in
-	for(byte motor=0; motor<3; motor++){
-		if( remainingSteps[motor] > 1 ){ // check if finished stepping   
-		    // speedCount determines the stepping frequency
-		    // interrupt speed (5khz) divided by speedCounter equals stepping freq
-		    // 1khz is the maximum reliable frequency at 5v, so we use 5 as the top speed
-		    // 5,000hz/5 = 1000hz = micro-stepping frequency
-			if(speedCounter[motor] == 0) { 
-				step_index[motor] += step_dir[motor];
-				remainingSteps[motor]--;
-				speedCounter[motor] = speed_array[motor][speed_index[motor]];
-				speed_index[motor]++;
-				if(speed_index[motor] >= SPEED_ARRAY_LENGTH){
-			      speed_index[motor] = 0;
-			    }
-			}
-			else{
-			   speedCounter[motor] = speedCounter[motor]-1;
-			}
-			
-		}
-		else {  // if this was the last step
-			remainingSteps[motor] = 0;  
-			isRunning[motor] = false;
-			step_index[motor] = 8;
-			speedCounter[motor] = -1;
-		}     
-		
-		//   keep indicies from rolling over or under
-		if( step_index[motor] >= 8){
-			step_index[motor] = 0;
-		}
-		else if( step_index[motor] < 0){
-			step_index[motor] = 7;
-		}
-		if(isRunning[motor] == false){
-			step_index[motor] = 8;
-		}
-	}
 
-    shift_outputs[0] |= _steps_right[step_index[MOTOR_RIGHT]];
-    shift_outputs[0] |= _steps_left[step_index[MOTOR_GRIPPER]];
-    shift_outputs[1] |= _steps_left[step_index[MOTOR_LEFT]];
+  // BEGIN: Motor Control
+
+  byte    motorIdMask;
+  uint8_t motorIndex;
+  boolean motorIsOnActiveHold;
+  boolean motorIsRunning;
+
+  boolean advanceStepperCoilsNow;
+  boolean driveStepperCoilsNow;
+  byte    stepperControlLast;
+  byte    stepperControlRotated;
+  byte    stepperControlNow;
+    
+  motorIndex = 0;
+  motorIdMask = SPARKI_MOTOR_ID_MASK_ALL;
+
+  while ( motorIdMask != 0x00 ) {
+
+    if ( motorIdMask & 0x01 ) {
+
+      motorIsOnActiveHold = motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_ACT_HOLD_IS_ON;
+      motorIsRunning = motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING;
+
+      driveStepperCoilsNow = motorIsOnActiveHold || motorIsRunning;
+
+      if ( driveStepperCoilsNow ) {
+
+        stepperControlLast = motorControlWord[motorIndex];
+
+        advanceStepperCoilsNow = motorIsRunning && motorTimeToUpdateIntEvents[motorIndex] == 0;
+ 
+        if ( advanceStepperCoilsNow ) {
+
+          if ( motorStatusWord[motorIndex] & SPARKI_MOTOR_STATUS_MASK_DIR_IS_CW ) {
+            stepperControlRotated = ( stepperControlLast << 1 ) | ( stepperControlLast >> 7 );
+          }
+          else {
+            stepperControlRotated = ( stepperControlLast >> 1 ) | ( stepperControlLast << 7 );
+          }
+
+          stepperControlNow = stepperControlRotated & stepperControlLast;
+          if ( stepperControlNow == 0x00 ) {
+            stepperControlNow = stepperControlRotated | stepperControlLast;
+          }
+
+          motorControlWord[motorIndex] = stepperControlNow;
+
+          motorRemainingSteps[motorIndex]--;
+
+          if ( motorRemainingSteps[motorIndex] > 0 ) {
+            motorTimeToUpdateIntEvents[motorIndex] = motorUpdateIntervalIntEvents[motorIndex];
+          }
+          else {
+            motorStatusWord[motorIndex] &= ~ SPARKI_MOTOR_STATUS_MASK_MTR_IS_RUNNING;
+          }
+
+        }  // if (  advanceStepperCoilsNow )
+        else {
+
+          stepperControlNow = stepperControlLast;
+          if ( motorIsRunning ) motorTimeToUpdateIntEvents[motorIndex]--;
+
+        }  // if (  advanceStepperCoilsNow ) ... else
+
+      }  // if ( driveStepperCoilsNow )
+      else {
+
+        stepperControlNow = 0x00;
+
+      }  // if ( driveStepperCoilsNow ) ... else
+
+      switch ( motorIndex ) {
+        case SPARKI_MOTOR_INDEX_WHEEL_LEFT:
+          shift_outputs[SPARKI_SHIFT_REG_INDEX_MOTOR_WHEEL_LEFT] |= 
+            ( stepperControlNow & SPARKI_SHIFT_REG_MASK_MOTOR_WHEEL_LEFT );
+          break;
+        case SPARKI_MOTOR_INDEX_WHEEL_RIGHT:
+          shift_outputs[SPARKI_SHIFT_REG_INDEX_MOTOR_WHEEL_RIGHT] |= 
+            stepperControlNow & SPARKI_SHIFT_REG_MASK_MOTOR_WHEEL_RIGHT;
+          break;
+        case SPARKI_MOTOR_INDEX_GRIPPER:
+          shift_outputs[SPARKI_SHIFT_REG_INDEX_MOTOR_GRIPPER] |=
+            stepperControlNow & SPARKI_SHIFT_REG_MASK_MOTOR_GRIPPER;
+          break;
+      }  // switch ( motorIndex )
+
+    }  // if ( motorIdMask & 0x01 )
+
+    motorIdMask >>= 1;
+    motorIndex++;
+
+  }  // while ( motorIdMask & 0x01 )
+
+  // END: Motor Control
     
 	//output values to shift registers
     PORTD &= ~(1<<5);    // pull PD5 (shift-register latch) low
     SPI.transfer(shift_outputs[1]);
     SPI.transfer(shift_outputs[0]);
     PORTD |= (1<<5);    // pull PD5 (shift-register latch) high 
+
 }
 
 /***********************************************************************************
@@ -1332,6 +2505,8 @@ uint8_t st7565_buffer[1024] = {
 static uint8_t xUpdateMin, xUpdateMax, yUpdateMin, yUpdateMax;
 #endif
 
+
+
 static void updateBoundingBox(uint8_t xmin, uint8_t ymin, uint8_t xmax, uint8_t ymax) {
 #ifdef enablePartialUpdate
   if (xmin < xUpdateMin) xUpdateMin = xmin;
@@ -1341,23 +2516,12 @@ static void updateBoundingBox(uint8_t xmin, uint8_t ymin, uint8_t xmax, uint8_t 
 #endif
 }
 
-
-void SparkiClass::setPixelColor(uint8_t color){
-    // sanitize the input
-    if(color == WHITE){
-        pixel_color = WHITE;
-    }
-    if(color == BLACK){
-        pixel_color = BLACK;
-    }
-}
-
 void SparkiClass::drawBitmap(uint8_t x, uint8_t y, 
 			const uint8_t *bitmap, uint8_t w, uint8_t h) {
   for (uint8_t j=0; j<h; j++) {
     for (uint8_t i=0; i<w; i++ ) {
       if (pgm_read_byte(bitmap + i + (j/8)*w) & _BV(j%8)) {
-	my_setpixel(x+i, y+j, pixel_color);
+	my_setpixel(x+i, y+j, WHITE);
       }
     }
   }
@@ -1471,9 +2635,9 @@ void SparkiClass::drawLine(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1) {
 
   for (; x0<=x1; x0++) {
     if (steep) {
-      my_setpixel(y0, x0, pixel_color);
+      my_setpixel(y0, x0, WHITE);
     } else {
-      my_setpixel(x0, y0, pixel_color);
+      my_setpixel(x0, y0, WHITE);
     }
     err -= dy;
     if (err < 0) {
@@ -1489,7 +2653,7 @@ void SparkiClass::drawRectFilled(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
   // stupidest version - just pixels - but fast with internal buffer!
   for (uint8_t i=x; i<x+w; i++) {
     for (uint8_t j=y; j<y+h; j++) {
-      my_setpixel(i, j, pixel_color);
+      my_setpixel(i, j, WHITE);
     }
   }
 
@@ -1500,12 +2664,12 @@ void SparkiClass::drawRectFilled(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
 void SparkiClass::drawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
   // stupidest version - just pixels - but fast with internal buffer!
   for (uint8_t i=x; i<x+w; i++) {
-    my_setpixel(i, y, pixel_color);
-    my_setpixel(i, y+h-1, pixel_color);
+    my_setpixel(i, y, WHITE);
+    my_setpixel(i, y+h-1, WHITE);
   }
   for (uint8_t i=y; i<y+h; i++) {
-    my_setpixel(x, i, pixel_color);
-    my_setpixel(x+w-1, i, pixel_color);
+    my_setpixel(x, i, WHITE);
+    my_setpixel(x+w-1, i, WHITE);
   } 
 
   updateBoundingBox(x, y, x+w, y+h);
@@ -1521,10 +2685,10 @@ void SparkiClass::drawCircle(uint8_t x0, uint8_t y0, uint8_t r) {
   int8_t x = 0;
   int8_t y = r;
 
-  my_setpixel(x0, y0+r, pixel_color);
-  my_setpixel(x0, y0-r, pixel_color);
-  my_setpixel(x0+r, y0, pixel_color);
-  my_setpixel(x0-r, y0, pixel_color);
+  my_setpixel(x0, y0+r, WHITE);
+  my_setpixel(x0, y0-r, WHITE);
+  my_setpixel(x0+r, y0, WHITE);
+  my_setpixel(x0-r, y0, WHITE);
 
   while (x<y) {
     if (f >= 0) {
@@ -1536,15 +2700,15 @@ void SparkiClass::drawCircle(uint8_t x0, uint8_t y0, uint8_t r) {
     ddF_x += 2;
     f += ddF_x;
   
-    my_setpixel(x0 + x, y0 + y, pixel_color);
-    my_setpixel(x0 - x, y0 + y, pixel_color);
-    my_setpixel(x0 + x, y0 - y, pixel_color);
-    my_setpixel(x0 - x, y0 - y, pixel_color);
+    my_setpixel(x0 + x, y0 + y, WHITE);
+    my_setpixel(x0 - x, y0 + y, WHITE);
+    my_setpixel(x0 + x, y0 - y, WHITE);
+    my_setpixel(x0 - x, y0 - y, WHITE);
     
-    my_setpixel(x0 + y, y0 + x, pixel_color);
-    my_setpixel(x0 - y, y0 + x, pixel_color);
-    my_setpixel(x0 + y, y0 - x, pixel_color);
-    my_setpixel(x0 - y, y0 - x, pixel_color);
+    my_setpixel(x0 + y, y0 + x, WHITE);
+    my_setpixel(x0 - y, y0 + x, WHITE);
+    my_setpixel(x0 + y, y0 - x, WHITE);
+    my_setpixel(x0 - y, y0 - x, WHITE);
     
   }
 }
@@ -1559,7 +2723,7 @@ void SparkiClass::drawCircleFilled(uint8_t x0, uint8_t y0, uint8_t r) {
   int8_t y = r;
 
   for (uint8_t i=y0-r; i<=y0+r; i++) {
-    my_setpixel(x0, i, pixel_color);
+    my_setpixel(x0, i, WHITE);
   }
 
   while (x<y) {
@@ -1573,12 +2737,12 @@ void SparkiClass::drawCircleFilled(uint8_t x0, uint8_t y0, uint8_t r) {
     f += ddF_x;
   
     for (uint8_t i=y0-y; i<=y0+y; i++) {
-      my_setpixel(x0+x, i, pixel_color);
-      my_setpixel(x0-x, i, pixel_color);
+      my_setpixel(x0+x, i, WHITE);
+      my_setpixel(x0-x, i, WHITE);
     } 
     for (uint8_t i=y0-x; i<=y0+x; i++) {
-      my_setpixel(x0+y, i, pixel_color);
-      my_setpixel(x0-y, i, pixel_color);
+      my_setpixel(x0+y, i, WHITE);
+      my_setpixel(x0-y, i, WHITE);
     }    
   }
 }
@@ -1942,3 +3106,4 @@ void SparkiClass::readi2cRegister(unsigned char address, unsigned char data, uin
 
   i2cSendStop();
 }
+
