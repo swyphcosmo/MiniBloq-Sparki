@@ -1290,6 +1290,9 @@ void SparkiClass::turn (
 
   // Handle corner cases...
 
+  // Angle to give centerMoveDistanceSteps equal to approx Maximum 32 bit integer (exact number 225116588), picked smaller number to ensure steps variable will not overflow
+  if ( angleToTurnDeg == 0 ) angleToTurnDeg = 225000000;
+
   if ( speedPercent < 0 ) speedPercent = wheelSpeedPercentDefault;
 
   if ( radiusOfTurnMm == 0 ) {
@@ -1307,7 +1310,7 @@ void SparkiClass::turn (
       negRadSpinAngleDeg = -90;
     }
     else {
-      negRadSpinAngleDeg = +90;
+      negRadSpinAngleDeg = +90;rian m
     }
     radiusOfTurnMm   = - radiusOfTurnMm;
     directionIsRight = ! directionIsRight;  
@@ -1518,7 +1521,15 @@ void SparkiClass::pivotTurnLeftWait (
   int8_t  speedPercent
 ) {
 
-  turn ( angleToTurnDeg, false, wheelSeparationUmEff / 20, speedPercent );
+
+  if( angleToTurnDeg == 0 )
+  {
+    turn( )
+  }
+  else
+  {
+    turn ( angleToTurnDeg, false, wheelSeparationUmEff / 20, speedPercent );
+  }
 
 }
 
