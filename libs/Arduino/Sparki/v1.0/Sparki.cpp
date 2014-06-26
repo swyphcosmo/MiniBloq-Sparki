@@ -1291,7 +1291,11 @@ void SparkiClass::turn (
   // Handle corner cases...
 
   // Angle to give centerMoveDistanceSteps equal to approx Maximum 32 bit integer (exact number 225116588), picked smaller number to ensure steps variable will not overflow
-  if ( angleToTurnDeg == 0 ) angleToTurnDeg = 225000000;
+  if ( angleToTurnDeg == 0 )
+  { 
+    waitUntilDone = false;
+    angleToTurnDeg = 225000000;
+  }
 
   if ( speedPercent < 0 ) speedPercent = wheelSpeedPercentDefault;
 
