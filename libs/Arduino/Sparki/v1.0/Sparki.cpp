@@ -1314,7 +1314,7 @@ void SparkiClass::turn (
       negRadSpinAngleDeg = -90;
     }
     else {
-      negRadSpinAngleDeg = +90;rian m
+      negRadSpinAngleDeg = +90;
     }
     radiusOfTurnMm   = - radiusOfTurnMm;
     directionIsRight = ! directionIsRight;  
@@ -1525,16 +1525,8 @@ void SparkiClass::pivotTurnLeftWait (
   int8_t  speedPercent
 ) {
 
-
-  if( angleToTurnDeg == 0 )
-  {
-    turn( )
-  }
-  else
-  {
     turn ( angleToTurnDeg, false, wheelSeparationUmEff / 20, speedPercent );
-  }
-
+    
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
