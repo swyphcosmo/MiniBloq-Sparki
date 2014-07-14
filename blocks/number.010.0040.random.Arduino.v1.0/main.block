@@ -8,9 +8,9 @@
     <code>
 		<dataType>number</dataType>
 		<initialCode>
-			<line0>Random()</line0>
+			<line0>random()</line0>
 		</initialCode>
-		<keywords1>Random</keywords1>
+		<keywords1>random</keywords1>
 	</code>
     <interface>
 		<originalSize>
