@@ -1294,7 +1294,10 @@ void SparkiClass::turn (
   if ( angleToTurnDeg == 0 )
   { 
     waitUntilDone = false;
-    angleToTurnDeg = 225000000;
+    // angleToTurnDeg = 225000000;
+    // Large number potentially causing overflow
+    // Sparki turns in reverse if this case happens
+    angleToTurnDeg = 2250;
   }
 
   if ( speedPercent < 0 ) speedPercent = wheelSpeedPercentDefault;
