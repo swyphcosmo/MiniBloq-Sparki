@@ -8,10 +8,9 @@
     <code>
 		<dataType>void</dataType>
 		<initialCode>
-			<line0>sparki.servo</line0>
+			<line0>sparki</line0>
 		</initialCode>
-		<paramListStart>( </paramListStart>
-		<paramListEnd> ); </paramListEnd>
+		<paramListStart>.</paramListStart>
 	</code>
     <interface>
 		<originalSize>
